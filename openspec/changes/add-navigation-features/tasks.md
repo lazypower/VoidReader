@@ -14,12 +14,12 @@
 - [ ] 1.11 Support regex toggle (optional)
 
 ## 2. Find & Replace (Edit Mode)
-- [ ] 2.1 Extend FindBar with replace field
-- [ ] 2.2 Implement Cmd+H to show find & replace
-- [ ] 2.3 Replace current match button
-- [ ] 2.4 Replace all matches button
+- [x] 2.1 Extend FindBar with replace field
+- [x] 2.2 Implement Cmd+H to show find & replace
+- [x] 2.3 Replace current match button
+- [x] 2.4 Replace all matches button
 - [ ] 2.5 Show replacement preview
-- [ ] 2.6 Only enable in edit mode
+- [x] 2.6 Only enable in edit mode
 
 ## 3. Outline/TOC Sidebar
 - [x] 3.1 Extract headings from markdown AST

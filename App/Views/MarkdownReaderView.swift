@@ -43,16 +43,18 @@ struct MarkdownReaderView: View {
 struct MarkdownReaderViewWithAnchors: View {
     let text: String
     let headings: [HeadingInfo]
+    var blocks: [MarkdownBlock] = []
     var searchText: String = ""
     var currentMatchIndex: Int = 0
     var onTaskToggle: ((Int, Bool) -> Void)?
 
     var body: some View {
-        let blocks = BlockRenderer.render(text)
-        let matchInfo = computeMatchInfo(blocks: blocks)
+        // Use provided blocks or render if empty (fallback)
+        let renderBlocks = blocks.isEmpty ? BlockRenderer.render(text) : blocks
+        let matchInfo = computeMatchInfo(blocks: renderBlocks)
 
         VStack(alignment: .leading, spacing: 16) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
+            ForEach(Array(renderBlocks.enumerated()), id: \.offset) { index, block in
                 // Add match anchor if this block contains the current match
                 if let matchIdx = matchInfo.blockToFirstMatch[index], matchIdx == currentMatchIndex {
                     Color.clear.frame(height: 0).id("match-\(currentMatchIndex)")
@@ -98,8 +100,7 @@ struct MarkdownReaderViewWithAnchors: View {
     }
 
     /// Finds which block contains the given heading text.
-    static func blockIndex(for headingText: String, in text: String) -> Int? {
-        let blocks = BlockRenderer.render(text)
+    static func blockIndex(for headingText: String, in blocks: [MarkdownBlock]) -> Int? {
         for (idx, block) in blocks.enumerated() {
             if case .text(let attr) = block,
                String(attr.characters).contains(headingText) {
@@ -110,10 +111,9 @@ struct MarkdownReaderViewWithAnchors: View {
     }
 
     /// Finds which block contains the Nth match (0-indexed).
-    static func blockIndexForMatch(_ matchIndex: Int, searchText: String, in text: String) -> Int? {
+    static func blockIndexForMatch(_ matchIndex: Int, searchText: String, in blocks: [MarkdownBlock]) -> Int? {
         guard !searchText.isEmpty else { return nil }
 
-        let blocks = BlockRenderer.render(text)
         var globalMatchIndex = 0
 
         for (blockIdx, block) in blocks.enumerated() {

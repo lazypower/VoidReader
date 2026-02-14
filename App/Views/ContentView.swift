@@ -40,9 +40,14 @@ struct ContentView: View {
 
     // Find bar
     @State private var showFindBar = false
+    @State private var showReplace = false
     @State private var searchText = ""
+    @State private var replaceText = ""
     @State private var searchMatches: [TextSearcher.Match] = []
     @State private var currentMatchIndex = 0
+
+    // Cached rendered blocks (expensive to compute)
+    @State private var renderedBlocks: [MarkdownBlock] = []
 
     init(document: Binding<MarkdownDocument>, fileURL: URL? = nil) {
         self._document = document
@@ -87,9 +92,12 @@ struct ContentView: View {
             documentStats = DocumentStats(text: newValue)
             // Update headings for outline
             updateHeadings(from: newValue)
+            // Update cached blocks
+            updateRenderedBlocks(from: newValue)
         }
         .onAppear {
             updateHeadings(from: document.text)
+            updateRenderedBlocks(from: document.text)
         }
         .onReceive(printPublisher) { _ in
             printDocument()
@@ -107,10 +115,14 @@ struct ContentView: View {
             ShareSheetPresenter(isPresented: $showingShare, items: [document.text])
         )
         .background(
-            // Keyboard shortcut for Cmd+F
-            Button("") { showFind() }
-                .keyboardShortcut("f", modifiers: .command)
-                .hidden()
+            // Keyboard shortcuts for Find/Replace
+            Group {
+                Button("") { showFind() }
+                    .keyboardShortcut("f", modifiers: .command)
+                Button("") { showFindAndReplace() }
+                    .keyboardShortcut("h", modifiers: .command)
+            }
+            .hidden()
         )
         .onExitCommand {
             if showFindBar {
@@ -154,10 +166,15 @@ struct ContentView: View {
                     FindBarView(
                         isVisible: $showFindBar,
                         searchText: $searchText,
+                        replaceText: $replaceText,
                         matchCount: searchMatches.count,
                         currentMatch: searchMatches.isEmpty ? 0 : currentMatchIndex + 1,
+                        isEditMode: isEditMode,
+                        showReplace: showReplace,
                         onNext: findNext,
                         onPrevious: findPrevious,
+                        onReplace: replaceCurrent,
+                        onReplaceAll: replaceAll,
                         onDismiss: dismissFindBar
                     )
                     .transition(.move(edge: .top).combined(with: .opacity))
@@ -243,10 +260,14 @@ struct ContentView: View {
         headings = MarkdownParser.extractHeadings(from: doc)
     }
 
+    private func updateRenderedBlocks(from text: String) {
+        renderedBlocks = BlockRenderer.render(text)
+    }
+
     private func scrollToHeading(_ heading: HeadingInfo) {
         selectedHeadingID = heading.id
         // Find which block contains this heading and scroll there
-        if let blockIdx = MarkdownReaderViewWithAnchors.blockIndex(for: heading.text, in: document.text) {
+        if let blockIdx = MarkdownReaderViewWithAnchors.blockIndex(for: heading.text, in: renderedBlocks) {
             scrollToHeadingIndex = blockIdx
         }
     }
@@ -262,9 +283,18 @@ struct ContentView: View {
     private func dismissFindBar() {
         withAnimation(.easeInOut(duration: 0.15)) {
             showFindBar = false
+            showReplace = false
             searchText = ""
+            replaceText = ""
             searchMatches = []
             currentMatchIndex = 0
+        }
+    }
+
+    private func showFindAndReplace() {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showFindBar = true
+            showReplace = true
         }
     }
 
@@ -281,10 +311,9 @@ struct ContentView: View {
 
     /// Counts matches in the rendered block text (not raw markdown).
     private func countMatchesInRenderedBlocks() -> [TextSearcher.Match] {
-        let blocks = BlockRenderer.render(document.text)
         var allMatches: [TextSearcher.Match] = []
 
-        for block in blocks {
+        for block in renderedBlocks {
             if case .text(let attrString) = block {
                 let blockText = String(attrString.characters)
                 let matches = TextSearcher.findMatches(query: searchText, in: blockText)
@@ -305,11 +334,49 @@ struct ContentView: View {
         currentMatchIndex = currentMatchIndex == 0 ? searchMatches.count - 1 : currentMatchIndex - 1
     }
 
+    private func replaceCurrent() {
+        guard !searchText.isEmpty, !searchMatches.isEmpty else { return }
+
+        // Replace the current match in the document text
+        // We need to find the actual position in the raw text
+        let matches = TextSearcher.findMatches(query: searchText, in: document.text)
+        guard currentMatchIndex < matches.count else { return }
+
+        let match = matches[currentMatchIndex]
+        var newText = document.text
+        newText.replaceSubrange(match.range, with: replaceText)
+        document.text = newText
+
+        // Update search results
+        updateSearch()
+
+        // Adjust current match index if needed
+        if currentMatchIndex >= searchMatches.count && !searchMatches.isEmpty {
+            currentMatchIndex = searchMatches.count - 1
+        }
+    }
+
+    private func replaceAll() {
+        guard !searchText.isEmpty, !searchMatches.isEmpty else { return }
+
+        // Replace all occurrences (work backwards to preserve indices)
+        let matches = TextSearcher.findMatches(query: searchText, in: document.text)
+        var newText = document.text
+
+        for match in matches.reversed() {
+            newText.replaceSubrange(match.range, with: replaceText)
+        }
+
+        document.text = newText
+        updateSearch()
+        currentMatchIndex = 0
+    }
+
     private func scrollToMatch(_ matchIndex: Int, proxy: ScrollViewProxy) {
         if let blockIdx = MarkdownReaderViewWithAnchors.blockIndexForMatch(
             matchIndex,
             searchText: searchText,
-            in: document.text
+            in: renderedBlocks
         ) {
             withAnimation(.easeInOut(duration: 0.2)) {
                 proxy.scrollTo("block-\(blockIdx)", anchor: .center)
@@ -336,6 +403,7 @@ struct ContentView: View {
                     MarkdownReaderViewWithAnchors(
                         text: document.text,
                         headings: headings,
+                        blocks: renderedBlocks,
                         searchText: searchText,
                         currentMatchIndex: currentMatchIndex,
                         onTaskToggle: handleTaskToggle
