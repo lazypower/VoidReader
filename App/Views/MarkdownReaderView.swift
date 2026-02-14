@@ -37,6 +37,9 @@ struct MarkdownReaderView: View {
 
         case .image(let imageData):
             ImageBlockView(data: imageData)
+
+        case .mermaid(let mermaidData):
+            MermaidBlockView(data: mermaidData)
         }
     }
 }
@@ -190,6 +193,9 @@ private struct BlockView: View {
 
         case .image(let imageData):
             ImageBlockView(data: imageData)
+
+        case .mermaid(let mermaidData):
+            MermaidBlockView(data: mermaidData)
         }
     }
 

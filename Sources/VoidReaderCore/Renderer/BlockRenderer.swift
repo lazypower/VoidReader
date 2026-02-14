@@ -122,10 +122,15 @@ struct BlockWalker: MarkupWalker {
             ? String(codeBlock.code.dropLast())
             : codeBlock.code
 
-        blocks.append(.codeBlock(CodeBlockData(
-            code: code,
-            language: codeBlock.language
-        )))
+        // Detect mermaid diagrams
+        if codeBlock.language?.lowercased() == "mermaid" {
+            blocks.append(.mermaid(MermaidData(source: code)))
+        } else {
+            blocks.append(.codeBlock(CodeBlockData(
+                code: code,
+                language: codeBlock.language
+            )))
+        }
     }
 
     mutating func visitBlockQuote(_ blockQuote: BlockQuote) {

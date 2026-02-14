@@ -9,6 +9,7 @@ public enum MarkdownBlock: Identifiable {
     case taskList([TaskItem])
     case codeBlock(CodeBlockData)
     case image(ImageData)
+    case mermaid(MermaidData)
 
     public var id: String {
         switch self {
@@ -22,6 +23,8 @@ public enum MarkdownBlock: Identifiable {
             return "code-\(data.id)"
         case .image(let data):
             return "image-\(data.id)"
+        case .mermaid(let data):
+            return "mermaid-\(data.id)"
         }
     }
 }
@@ -94,6 +97,16 @@ public struct CodeBlockData: Identifiable {
     public init(code: String, language: String?) {
         self.code = code
         self.language = language
+    }
+}
+
+/// Data for a mermaid diagram.
+public struct MermaidData: Identifiable {
+    public let id = UUID()
+    public var source: String
+
+    public init(source: String) {
+        self.source = source
     }
 }
 

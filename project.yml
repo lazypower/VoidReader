@@ -24,6 +24,12 @@ targets:
       - path: App
         excludes:
           - "**/.DS_Store"
+          - App/Resources
+    resources:
+      - path: App/Resources
+        excludes:
+          - "**/.DS_Store"
+          - Assets.xcassets
     dependencies:
       - package: VoidReaderCore
     settings:

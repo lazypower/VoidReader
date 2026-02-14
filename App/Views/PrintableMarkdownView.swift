@@ -116,6 +116,13 @@ final class PrintableMarkdownView: NSView {
                 type: .imagePlaceholder(data.altText),
                 frame: NSRect(x: xOffset, y: yOffset, width: contentWidth, height: 24)
             )
+
+        case .mermaid:
+            // For print, show placeholder for mermaid diagrams
+            return RenderedBlock(
+                type: .mermaidPlaceholder,
+                frame: NSRect(x: xOffset, y: yOffset, width: contentWidth, height: 48)
+            )
         }
     }
 
@@ -173,6 +180,20 @@ final class PrintableMarkdownView: NSView {
             ]
             let text = "[\(altText)]"
             (text as NSString).draw(in: rendered.frame, withAttributes: attrs)
+
+        case .mermaidPlaceholder:
+            // Draw placeholder box for mermaid diagram
+            NSColor(white: 0.95, alpha: 1.0).setFill()
+            let bgPath = NSBezierPath(roundedRect: rendered.frame.insetBy(dx: 0, dy: 4), xRadius: 4, yRadius: 4)
+            bgPath.fill()
+
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 12),
+                .foregroundColor: NSColor.secondaryLabelColor
+            ]
+            let text = "[Mermaid Diagram]"
+            let textRect = rendered.frame.insetBy(dx: 12, dy: 12)
+            (text as NSString).draw(in: textRect, withAttributes: attrs)
         }
     }
 
@@ -317,6 +338,7 @@ private struct RenderedBlock {
         case table(TableData)
         case taskList([TaskItem])
         case imagePlaceholder(String)
+        case mermaidPlaceholder
     }
 
     let type: BlockType
