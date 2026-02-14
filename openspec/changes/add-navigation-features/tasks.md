@@ -22,15 +22,15 @@
 - [ ] 2.6 Only enable in edit mode
 
 ## 3. Outline/TOC Sidebar
-- [ ] 3.1 Extract headings from markdown AST
-- [ ] 3.2 Build hierarchical outline model (H1 > H2 > H3...)
-- [ ] 3.3 Create OutlineSidebar view component
-- [ ] 3.4 Display heading hierarchy with indentation
-- [ ] 3.5 Click heading to scroll to location
+- [x] 3.1 Extract headings from markdown AST
+- [x] 3.2 Build hierarchical outline model (H1 > H2 > H3...)
+- [x] 3.3 Create OutlineSidebar view component
+- [x] 3.4 Display heading hierarchy with indentation
+- [x] 3.5 Click heading to scroll to location (scrolls to block containing heading)
 - [ ] 3.6 Highlight current section based on scroll position
-- [ ] 3.7 Implement Cmd+Shift+O to toggle sidebar
-- [ ] 3.8 Remember sidebar state per window
-- [ ] 3.9 Animate sidebar show/hide
+- [x] 3.7 Implement Cmd+Shift+O to toggle sidebar
+- [x] 3.8 Remember sidebar state per window (@AppStorage)
+- [x] 3.9 Animate sidebar show/hide
 
 ## 4. Keyboard Navigation
 - [ ] 4.1 Arrow keys navigate outline when focused

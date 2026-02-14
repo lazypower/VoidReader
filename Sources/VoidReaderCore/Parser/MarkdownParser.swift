@@ -46,6 +46,11 @@ public struct HeadingInfo: Identifiable {
     public let id = UUID()
     public let level: Int
     public let text: String
+
+    public init(level: Int, text: String) {
+        self.level = level
+        self.text = text
+    }
 }
 
 // MARK: - Markup Extensions

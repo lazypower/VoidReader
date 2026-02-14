@@ -30,29 +30,31 @@
 - [x] 5.5 File > New opens editor view
 
 ## 6. Print and Export
-- [ ] 6.1 Implement Cmd+P print flow
-- [ ] 6.2 Create printable view from rendered markdown
-- [ ] 6.3 Include mermaid diagrams as images in print
-- [ ] 6.4 Implement Export as PDF menu item
-- [ ] 6.5 Generate PDF from rendered content
+- [x] 6.1 Implement Cmd+P print flow
+- [x] 6.2 Create printable view from rendered markdown
+- [ ] 6.3 Include mermaid diagrams as images in print (blocked: Mermaid not yet implemented)
+- [x] 6.4 Implement Export as PDF menu item
+- [x] 6.5 Generate PDF from rendered content
+- [ ] 6.6 Polish: Paginated vector PDF export (current impl is single-page raster via dataWithPDF; proper impl needs CGContext with manual page breaks)
 
 ## 7. Scroll Position Memory
-- [ ] 7.1 Track scroll position per document
-- [ ] 7.2 Store position with document path in UserDefaults
-- [ ] 7.3 Restore position when reopening document
-- [ ] 7.4 Handle document content changes gracefully
+- [x] 7.1 Track scroll position per document
+- [x] 7.2 Store position with document path in UserDefaults
+- [ ] 7.3 Restore position when reopening document (partial: SwiftUI ScrollView limitation)
+- [x] 7.4 Handle document content changes gracefully
 
 ## 8. Share Sheet
-- [ ] 8.1 Add share button to toolbar
-- [ ] 8.2 Implement File > Share menu item
-- [ ] 8.3 Provide rendered content to share sheet
-- [ ] 8.4 Support sharing as PDF
+- [x] 8.1 Add share button to toolbar
+- [x] 8.2 Implement File > Share menu item
+- [x] 8.3 Provide rendered content to share sheet
+- [x] 8.4 Support sharing as PDF
 
-## 9. Quick Look Extension
+## 9. Quick Look Extension (TODO - deferred)
 - [ ] 9.1 Create Quick Look preview extension target
 - [ ] 9.2 Register for markdown UTTypes
 - [ ] 9.3 Render markdown in preview
 - [ ] 9.4 Support light/dark appearance
+<!-- Deferred: Requires separate app extension target, will implement later -->
 
 ## 10. Testing
 - [x] 10.1 Test file open via File > Open → reader view
