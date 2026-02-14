@@ -95,6 +95,19 @@ struct BlockWalker: MarkupWalker {
     }
 
     mutating func visitParagraph(_ paragraph: Paragraph) {
+        // Check if paragraph contains only a single image (make it a block)
+        let children = Array(paragraph.children)
+        if children.count == 1, let image = children.first as? Markdown.Image {
+            flushTextBuffer()
+            isFirstBlock = false
+            blocks.append(.image(ImageData(
+                source: image.source ?? "",
+                altText: image.plainText,
+                title: image.title
+            )))
+            return
+        }
+
         addBlockSpacing()
         for child in paragraph.children {
             visit(child)
@@ -335,6 +348,7 @@ struct BlockWalker: MarkupWalker {
             }
         }
     }
+
 
     mutating func visitImage(_ image: Markdown.Image) {
         var attrs = AttributeContainer()

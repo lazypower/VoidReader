@@ -35,12 +35,16 @@ struct ContentView: View {
 
     private var readerView: some View {
         ScrollView {
-            MarkdownReaderView(text: document.text)
+            MarkdownReaderView(text: document.text, onTaskToggle: handleTaskToggle)
                 .padding(40)
                 .frame(maxWidth: 720, alignment: .leading)
         }
         .frame(maxWidth: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
+    }
+
+    private func handleTaskToggle(index: Int, newState: Bool) {
+        document.text = MarkdownTextUtils.toggleTask(in: document.text, at: index, to: newState)
     }
 
     private var editorView: some View {
@@ -52,7 +56,7 @@ struct ContentView: View {
 
             // Preview
             ScrollView {
-                MarkdownReaderView(text: document.text)
+                MarkdownReaderView(text: document.text, onTaskToggle: handleTaskToggle)
                     .padding(40)
                     .frame(maxWidth: 720, alignment: .leading)
             }

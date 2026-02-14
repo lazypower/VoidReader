@@ -8,6 +8,7 @@ public enum MarkdownBlock: Identifiable {
     case table(TableData)
     case taskList([TaskItem])
     case codeBlock(CodeBlockData)
+    case image(ImageData)
 
     public var id: String {
         switch self {
@@ -19,6 +20,8 @@ public enum MarkdownBlock: Identifiable {
             return "tasklist-\(items.map { $0.id.uuidString }.joined())"
         case .codeBlock(let data):
             return "code-\(data.id)"
+        case .image(let data):
+            return "image-\(data.id)"
         }
     }
 }
@@ -91,5 +94,24 @@ public struct CodeBlockData: Identifiable {
     public init(code: String, language: String?) {
         self.code = code
         self.language = language
+    }
+}
+
+/// Data for an image with URL and alt text.
+public struct ImageData: Identifiable {
+    public let id = UUID()
+    public var source: String
+    public var altText: String
+    public var title: String?
+
+    public init(source: String, altText: String, title: String? = nil) {
+        self.source = source
+        self.altText = altText
+        self.title = title
+    }
+
+    /// Returns a URL if the source is a valid URL string.
+    public var url: URL? {
+        URL(string: source)
     }
 }

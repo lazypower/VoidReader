@@ -32,6 +32,9 @@ struct MarkdownReaderView: View {
 
         case .codeBlock(let codeData):
             CodeBlockView(data: codeData)
+
+        case .image(let imageData):
+            ImageBlockView(data: imageData)
         }
     }
 }
