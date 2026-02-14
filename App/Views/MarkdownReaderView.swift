@@ -4,13 +4,15 @@ import VoidReaderCore
 /// Renders markdown text as native SwiftUI content.
 struct MarkdownReaderView: View {
     let text: String
+    var blocks: [MarkdownBlock] = []
     var onTaskToggle: ((Int, Bool) -> Void)?
 
     var body: some View {
-        let blocks = BlockRenderer.render(text)
+        // Use provided blocks or render if empty (fallback for previews)
+        let renderBlocks = blocks.isEmpty ? BlockRenderer.render(text) : blocks
 
         VStack(alignment: .leading, spacing: 16) {
-            ForEach(blocks) { block in
+            ForEach(renderBlocks) { block in
                 blockView(for: block)
             }
         }

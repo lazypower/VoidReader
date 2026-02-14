@@ -491,9 +491,9 @@ struct ContentView: View {
                 .frame(minWidth: 200)
                 .focused($isEditorFocused)
 
-            // Preview (uses debounced text for performance)
+            // Preview (uses debounced text and cached blocks for performance)
             ScrollView {
-                MarkdownReaderView(text: debouncedText, onTaskToggle: handleTaskToggle)
+                MarkdownReaderView(text: debouncedText, blocks: renderedBlocks, onTaskToggle: handleTaskToggle)
                     .padding(40)
                     .frame(maxWidth: 720, alignment: .leading)
             }
