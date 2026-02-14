@@ -43,7 +43,7 @@
 - [x] 7.4 Calculate reading time (~200 wpm)
 - [x] 7.5 Update stats on document change (debounced)
 - [ ] 7.6 Show selection stats when text selected
-- [ ] 7.7 Add status bar toggle to preferences
+- [x] 7.7 Add status bar toggle to View menu (Cmd+Shift+/)
 - [x] 7.8 Persist preference (@AppStorage)
 
 ## 8. Distraction-Free Mode
