@@ -1,33 +1,33 @@
 # Tasks: Add Document-Based App Architecture
 
 ## 1. Xcode Project Setup
-- [ ] 1.1 Create new Xcode project with Document App template
-- [ ] 1.2 Configure deployment target to macOS 14+
-- [ ] 1.3 Set Swift language version to 5.9+
-- [ ] 1.4 Configure app bundle identifier and signing
+- [x] 1.1 Create new Xcode project with Document App template
+- [x] 1.2 Configure deployment target to macOS 14+
+- [x] 1.3 Set Swift language version to 5.9+
+- [x] 1.4 Configure app bundle identifier and signing
 
 ## 2. Document Model
-- [ ] 2.1 Create MarkdownDocument conforming to FileDocument
-- [ ] 2.2 Implement init(configuration:) for reading files
-- [ ] 2.3 Implement fileWrapper(configuration:) for writing files
-- [ ] 2.4 Define readableContentTypes for .md/.markdown
+- [x] 2.1 Create MarkdownDocument conforming to FileDocument
+- [x] 2.2 Implement init(configuration:) for reading files
+- [x] 2.3 Implement fileWrapper(configuration:) for writing files
+- [x] 2.4 Define readableContentTypes for .md/.markdown
 
 ## 3. App Entry Point
-- [ ] 3.1 Configure DocumentGroup in @main App struct
-- [ ] 3.2 Set up content view to receive document binding
-- [ ] 3.3 Configure window styling and default size
+- [x] 3.1 Configure DocumentGroup in @main App struct
+- [x] 3.2 Set up content view to receive document binding
+- [x] 3.3 Configure window styling and default size
 
 ## 4. UTType Registration
-- [ ] 4.1 Add UTType declarations to Info.plist
-- [ ] 4.2 Register app as handler for markdown files
+- [x] 4.1 Add UTType declarations to Info.plist
+- [x] 4.2 Register app as handler for markdown files
 - [ ] 4.3 Configure document type icons (optional)
 
 ## 5. Context-Aware Launch Mode
-- [ ] 5.1 Detect if launched with file argument
-- [ ] 5.2 Pass launch context to document view
-- [ ] 5.3 Open in reader view when file provided
-- [ ] 5.4 Open in editor view when no file (new document)
-- [ ] 5.5 File > New opens editor view
+- [x] 5.1 Detect if launched with file argument
+- [x] 5.2 Pass launch context to document view
+- [x] 5.3 Open in reader view when file provided
+- [x] 5.4 Open in editor view when no file (new document)
+- [x] 5.5 File > New opens editor view
 
 ## 6. Print and Export
 - [ ] 6.1 Implement Cmd+P print flow
@@ -55,11 +55,11 @@
 - [ ] 9.4 Support light/dark appearance
 
 ## 10. Testing
-- [ ] 10.1 Test file open via File > Open → reader view
-- [ ] 10.2 Test drag-drop onto dock icon → reader view
-- [ ] 10.3 Test double-click from Finder → reader view
-- [ ] 10.4 Test app launch without file → editor view
-- [ ] 10.5 Test File > New → editor view
+- [x] 10.1 Test file open via File > Open → reader view
+- [x] 10.2 Test drag-drop onto dock icon → reader view
+- [x] 10.3 Test double-click from Finder → reader view
+- [x] 10.4 Test app launch without file → editor view
+- [x] 10.5 Test File > New → editor view
 - [ ] 10.6 Test recent documents menu
 - [ ] 10.7 Test print output
 - [ ] 10.8 Test PDF export

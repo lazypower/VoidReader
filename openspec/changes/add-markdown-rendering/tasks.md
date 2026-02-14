@@ -25,13 +25,13 @@
 - [ ] 3.13 Implement image rendering (async loading)
 
 ## 4. Block-Level Components (GFM Extensions)
-- [ ] 4.1 Create TableBlockView using SwiftUI Grid
-- [ ] 4.2 Implement column alignment (left/center/right)
-- [ ] 4.3 Style table headers distinctly
-- [ ] 4.4 Support inline formatting within cells
-- [ ] 4.5 Create TaskListView with checkbox controls
+- [x] 4.1 Create TableBlockView using SwiftUI Grid
+- [x] 4.2 Implement column alignment (left/center/right)
+- [x] 4.3 Style table headers distinctly
+- [x] 4.4 Support inline formatting within cells
+- [x] 4.5 Create TaskListView with checkbox controls
 - [ ] 4.6 Implement checkbox toggle binding to source
-- [ ] 4.7 Integrate block components into document flow
+- [x] 4.7 Integrate block components into document flow
 
 ## 5. Reader View
 - [ ] 5.1 Create MarkdownReaderView SwiftUI component
@@ -49,11 +49,11 @@
 - [ ] 6.6 Style task checkboxes consistently
 
 ## 7. Code Block Copy Button
-- [ ] 7.1 Add copy button overlay to code blocks
-- [ ] 7.2 Show button on hover, subtle otherwise
-- [ ] 7.3 Copy code content to clipboard on click
-- [ ] 7.4 Show "Copied" feedback animation
-- [ ] 7.5 Preserve exact whitespace when copying
+- [x] 7.1 Add copy button overlay to code blocks
+- [x] 7.2 Show button on hover, subtle otherwise
+- [x] 7.3 Copy code content to clipboard on click
+- [x] 7.4 Show "Copied" feedback animation
+- [x] 7.5 Preserve exact whitespace when copying
 
 ## 8. Image Zoom
 - [ ] 8.1 Make images clickable
