@@ -1,7 +1,7 @@
 # VoidReader Makefile
 # Run `make help` for available commands
 
-.PHONY: help project build run test clean format lint xcode setup
+.PHONY: help project build run test clean format lint xcode setup install
 
 # Default target
 help:
@@ -11,6 +11,7 @@ help:
 	@echo "  make project   - Regenerate Xcode project from project.yml"
 	@echo "  make build     - Build the app (Debug)"
 	@echo "  make release   - Build the app (Release)"
+	@echo "  make install   - Build release and install to /Applications"
 	@echo "  make run       - Build and run the app"
 	@echo "  make test      - Run all tests"
 	@echo "  make clean     - Clean build artifacts"
@@ -52,6 +53,13 @@ release:
 	@echo "Building (Release)..."
 	xcodebuild -scheme VoidReader -configuration Release build -quiet
 	@echo "✓ Release build succeeded"
+
+# Install to /Applications
+install: release
+	@echo "Installing to /Applications..."
+	@rm -rf /Applications/VoidReader.app
+	@cp -R "$$(xcodebuild -scheme VoidReader -configuration Release -showBuildSettings | grep -m 1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/VoidReader.app" /Applications/
+	@echo "✓ Installed to /Applications/VoidReader.app"
 
 # Build and run
 run: build
