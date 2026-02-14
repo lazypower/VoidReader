@@ -30,7 +30,7 @@
 
 ## 6. Error Handling
 - [x] 6.1 Display syntax errors gracefully
-- [ ] 6.2 Fall back to showing raw code on render failure
+- [x] 6.2 Fall back to showing raw code on render failure
 - [x] 6.3 Log errors for debugging
 
 ## 7. Testing
