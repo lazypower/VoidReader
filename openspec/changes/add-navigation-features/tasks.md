@@ -1,15 +1,15 @@
 # Tasks: Add Navigation Features
 
 ## 1. Find Bar
-- [ ] 1.1 Create FindBar view component
-- [ ] 1.2 Implement Cmd+F to show/focus find bar
-- [ ] 1.3 Implement Escape to dismiss find bar
-- [ ] 1.4 Search document content as user types
-- [ ] 1.5 Highlight all matches in document
-- [ ] 1.6 Show match count (e.g., "3 of 12")
-- [ ] 1.7 Implement Enter/Shift+Enter for next/previous match
-- [ ] 1.8 Implement Cmd+G / Cmd+Shift+G for next/previous
-- [ ] 1.9 Scroll to and highlight current match
+- [x] 1.1 Create FindBar view component
+- [x] 1.2 Implement Cmd+F to show/focus find bar
+- [x] 1.3 Implement Escape to dismiss find bar
+- [x] 1.4 Search document content as user types
+- [x] 1.5 Highlight all matches in document (yellow background)
+- [x] 1.6 Show match count (e.g., "3 of 12")
+- [x] 1.7 Implement Enter/Shift+Enter for next/previous match
+- [x] 1.8 Implement Cmd+G / Cmd+Shift+G for next/previous
+- [x] 1.9 Scroll to and highlight current match
 - [ ] 1.10 Support case-sensitive toggle
 - [ ] 1.11 Support regex toggle (optional)
 

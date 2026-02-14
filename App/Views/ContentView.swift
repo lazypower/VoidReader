@@ -38,6 +38,12 @@ struct ContentView: View {
     @State private var contentHeight: CGFloat = 0
     @State private var scrollProxy: ScrollViewProxy?
 
+    // Find bar
+    @State private var showFindBar = false
+    @State private var searchText = ""
+    @State private var searchMatches: [TextSearcher.Match] = []
+    @State private var currentMatchIndex = 0
+
     init(document: Binding<MarkdownDocument>, fileURL: URL? = nil) {
         self._document = document
         self.fileURL = fileURL
@@ -94,9 +100,23 @@ struct ContentView: View {
         .onReceive(sharePublisher) { _ in
             showingShare = true
         }
+        .onChange(of: searchText) { _, _ in
+            updateSearch()
+        }
         .background(
             ShareSheetPresenter(isPresented: $showingShare, items: [document.text])
         )
+        .background(
+            // Keyboard shortcut for Cmd+F
+            Button("") { showFind() }
+                .keyboardShortcut("f", modifiers: .command)
+                .hidden()
+        )
+        .onExitCommand {
+            if showFindBar {
+                dismissFindBar()
+            }
+        }
     }
 
     // MARK: - Print & Export
@@ -129,6 +149,20 @@ struct ContentView: View {
 
             // Main content area
             VStack(spacing: 0) {
+                // Find bar
+                if showFindBar {
+                    FindBarView(
+                        isVisible: $showFindBar,
+                        searchText: $searchText,
+                        matchCount: searchMatches.count,
+                        currentMatch: searchMatches.isEmpty ? 0 : currentMatchIndex + 1,
+                        onNext: findNext,
+                        onPrevious: findPrevious,
+                        onDismiss: dismissFindBar
+                    )
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
                 // Main content
                 Group {
                     if document.text.isEmpty && !isEditMode {
@@ -152,6 +186,7 @@ struct ContentView: View {
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
+            .animation(.easeInOut(duration: 0.15), value: showFindBar)
         }
         .animation(.easeInOut(duration: 0.2), value: showOutlineSidebar)
         .toolbar {
@@ -216,6 +251,72 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Find Bar
+
+    private func showFind() {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showFindBar = true
+        }
+    }
+
+    private func dismissFindBar() {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showFindBar = false
+            searchText = ""
+            searchMatches = []
+            currentMatchIndex = 0
+        }
+    }
+
+    private func updateSearch() {
+        guard !searchText.isEmpty else {
+            searchMatches = []
+            currentMatchIndex = 0
+            return
+        }
+        // Count matches in rendered blocks (same as highlighting uses)
+        searchMatches = countMatchesInRenderedBlocks()
+        currentMatchIndex = searchMatches.isEmpty ? 0 : 0
+    }
+
+    /// Counts matches in the rendered block text (not raw markdown).
+    private func countMatchesInRenderedBlocks() -> [TextSearcher.Match] {
+        let blocks = BlockRenderer.render(document.text)
+        var allMatches: [TextSearcher.Match] = []
+
+        for block in blocks {
+            if case .text(let attrString) = block {
+                let blockText = String(attrString.characters)
+                let matches = TextSearcher.findMatches(query: searchText, in: blockText)
+                allMatches.append(contentsOf: matches)
+            }
+        }
+
+        return allMatches
+    }
+
+    private func findNext() {
+        guard !searchMatches.isEmpty else { return }
+        currentMatchIndex = (currentMatchIndex + 1) % searchMatches.count
+    }
+
+    private func findPrevious() {
+        guard !searchMatches.isEmpty else { return }
+        currentMatchIndex = currentMatchIndex == 0 ? searchMatches.count - 1 : currentMatchIndex - 1
+    }
+
+    private func scrollToMatch(_ matchIndex: Int, proxy: ScrollViewProxy) {
+        if let blockIdx = MarkdownReaderViewWithAnchors.blockIndexForMatch(
+            matchIndex,
+            searchText: searchText,
+            in: document.text
+        ) {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                proxy.scrollTo("block-\(blockIdx)", anchor: .center)
+            }
+        }
+    }
+
     private func setupDebouncing() {
         textUpdatePublisher
             .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
@@ -235,6 +336,8 @@ struct ContentView: View {
                     MarkdownReaderViewWithAnchors(
                         text: document.text,
                         headings: headings,
+                        searchText: searchText,
+                        currentMatchIndex: currentMatchIndex,
                         onTaskToggle: handleTaskToggle
                     )
                     .padding(40)
@@ -270,6 +373,15 @@ struct ContentView: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         scrollToHeadingIndex = nil
                     }
+                }
+            }
+            .onChange(of: currentMatchIndex) { _, newIndex in
+                scrollToMatch(newIndex, proxy: proxy)
+            }
+            .onChange(of: searchMatches.count) { _, _ in
+                // Scroll to first match when search results change
+                if !searchMatches.isEmpty {
+                    scrollToMatch(0, proxy: proxy)
                 }
             }
         }
