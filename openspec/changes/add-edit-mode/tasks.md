@@ -4,7 +4,7 @@
 - [x] 1.1 Add view mode state (reader/edit) to document view
 - [x] 1.2 Create toolbar button for mode toggle
 - [x] 1.3 Add keyboard shortcut for toggle (Cmd+E)
-- [ ] 1.4 Animate transition between modes
+- [x] 1.4 Animate transition between modes
 
 ## 2. Split Pane Layout
 - [x] 2.1 Create HSplitView with source and preview panes
@@ -22,7 +22,7 @@
 ## 4. Live Preview
 - [x] 4.1 Reuse MarkdownReaderView for preview pane
 - [x] 4.2 Update preview on source changes
-- [ ] 4.3 Debounce updates for performance
+- [x] 4.3 Debounce updates for performance
 - [x] 4.4 Handle rapid typing gracefully
 
 ## 5. Scroll Sync (Optional)
@@ -32,43 +32,43 @@
 - [ ] 5.4 Add preference to enable/disable sync
 
 ## 6. Polish
-- [ ] 6.1 Focus source editor when entering edit mode
+- [x] 6.1 Focus source editor when entering edit mode
 - [ ] 6.2 Restore scroll position when exiting edit mode
-- [ ] 6.3 Show unsaved indicator in title bar
+- [x] 6.3 Show unsaved indicator in title bar (handled by macOS DocumentGroup)
 
 ## 7. Status Bar
-- [ ] 7.1 Create StatusBar view component
-- [ ] 7.2 Calculate word count from document
-- [ ] 7.3 Calculate character count
-- [ ] 7.4 Calculate reading time (~200 wpm)
-- [ ] 7.5 Update stats on document change (debounced)
+- [x] 7.1 Create StatusBar view component
+- [x] 7.2 Calculate word count from document
+- [x] 7.3 Calculate character count
+- [x] 7.4 Calculate reading time (~200 wpm)
+- [x] 7.5 Update stats on document change (debounced)
 - [ ] 7.6 Show selection stats when text selected
-- [ ] 7.7 Add status bar toggle to preferences
-- [ ] 7.8 Persist preference
+- [x] 7.7 Add status bar toggle to View menu (Cmd+Shift+/)
+- [x] 7.8 Persist preference (@AppStorage)
 
 ## 8. Distraction-Free Mode
-- [ ] 8.1 Implement Cmd+Shift+F toggle
-- [ ] 8.2 Enter fullscreen on activation
-- [ ] 8.3 Hide toolbar, status bar, sidebar
-- [ ] 8.4 Center content with readable margins
-- [ ] 8.5 Show controls on mouse hover at top
-- [ ] 8.6 Exit on Escape or repeat shortcut
+- [x] 8.1 Implement Cmd+Shift+F toggle
+- [x] 8.2 Enter fullscreen on activation
+- [x] 8.3 Hide toolbar, status bar, sidebar
+- [x] 8.4 Center content with readable margins
+- [x] 8.5 Show controls on mouse hover at top
+- [x] 8.6 Exit on Escape or repeat shortcut
 
 ## 9. GFM Cheat Sheet
-- [ ] 9.1 Create cheat sheet content view with GFM syntax examples
-- [ ] 9.2 Implement key event monitoring for Option+Shift+/
-- [ ] 9.3 Create popover overlay anchored to window center
-- [ ] 9.4 Show overlay on key-down, dismiss on key-up
-- [ ] 9.5 Make examples selectable/copyable
+- [x] 9.1 Create cheat sheet content view with GFM syntax examples
+- [x] 9.2 Implement key event monitoring for Option+Shift+/
+- [x] 9.3 Create popover overlay anchored to window center
+- [x] 9.4 Show overlay on key-down, dismiss on key-up
+- [x] 9.5 Make examples selectable/copyable
 
 ## 10. Testing
 - [x] 10.1 Test mode toggle preserves content
 - [ ] 10.2 Test divider drag and persistence
 - [x] 10.3 Test live preview updates
 - [x] 10.4 Test save from edit mode
-- [ ] 10.5 Test cheat sheet appears/dismisses correctly
-- [ ] 10.6 Test cheat sheet works in both modes
-- [ ] 10.7 Test status bar updates correctly
+- [x] 10.5 Test cheat sheet appears/dismisses correctly
+- [x] 10.6 Test cheat sheet works in both modes
+- [x] 10.7 Test status bar updates correctly
 - [ ] 10.8 Test status bar toggle in preferences
 - [ ] 10.9 Test distraction-free mode enter/exit
 - [ ] 10.10 Test hover controls in distraction-free
