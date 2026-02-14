@@ -14,6 +14,7 @@ class ScrollPassthroughWebView: WKWebView {
 struct MermaidWebView: NSViewRepresentable {
     let source: String
     @Binding var renderedHeight: CGFloat
+    @Binding var hasError: Bool
     var allowsInteraction: Bool = false  // Enable zoom/pan for expanded view
     @Environment(\.colorScheme) private var colorScheme
 
@@ -48,7 +49,7 @@ struct MermaidWebView: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(heightBinding: $renderedHeight)
+        Coordinator(heightBinding: $renderedHeight, errorBinding: $hasError)
     }
 
     private func loadMermaid(in webView: WKWebView) {
@@ -82,9 +83,11 @@ struct MermaidWebView: NSViewRepresentable {
         var lastSource: String?
         var lastColorScheme: ColorScheme?
         var heightBinding: Binding<CGFloat>
+        var errorBinding: Binding<Bool>
 
-        init(heightBinding: Binding<CGFloat>) {
+        init(heightBinding: Binding<CGFloat>, errorBinding: Binding<Bool>) {
             self.heightBinding = heightBinding
+            self.errorBinding = errorBinding
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -93,10 +96,16 @@ struct MermaidWebView: NSViewRepresentable {
                 return
             }
 
-            // Update the height binding on main thread
+            let success = body["success"] as? Bool ?? true
+
+            // Update bindings on main thread
             DispatchQueue.main.async {
-                // Add some padding for the container
-                self.heightBinding.wrappedValue = CGFloat(height) + 16
+                if success {
+                    self.heightBinding.wrappedValue = CGFloat(height) + 16
+                    self.errorBinding.wrappedValue = false
+                } else {
+                    self.errorBinding.wrappedValue = true
+                }
             }
         }
 
@@ -115,35 +124,43 @@ struct MermaidBlockView: View {
     let data: MermaidData
     @State private var height: CGFloat = 100 // Start smaller, will expand
     @State private var showExpanded = false
+    @State private var hasError = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Header with mermaid icon/label and expand button
             HStack {
-                Image(systemName: "chart.bar.doc.horizontal")
-                    .foregroundColor(.secondary)
-                Text("Mermaid Diagram")
+                Image(systemName: hasError ? "exclamationmark.triangle" : "chart.bar.doc.horizontal")
+                    .foregroundColor(hasError ? .orange : .secondary)
+                Text(hasError ? "Mermaid Error" : "Mermaid Diagram")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(hasError ? .orange : .secondary)
                 Spacer()
-                Button {
-                    showExpanded = true
-                } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                if !hasError {
+                    Button {
+                        showExpanded = true
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Expand diagram")
                 }
-                .buttonStyle(.plain)
-                .help("Expand diagram")
             }
 
-            // WebView - height adjusts to content
-            MermaidWebView(source: data.source, renderedHeight: $height)
-                .frame(height: height)
-                .frame(maxWidth: .infinity)
-                .background(Color(nsColor: .controlBackgroundColor))
-                .cornerRadius(8)
-                .animation(.easeInOut(duration: 0.2), value: height)
+            if hasError {
+                // Fallback: show raw mermaid code
+                CodeBlockView(data: CodeBlockData(code: data.source, language: "mermaid"))
+            } else {
+                // WebView - height adjusts to content
+                MermaidWebView(source: data.source, renderedHeight: $height, hasError: $hasError)
+                    .frame(height: height)
+                    .frame(maxWidth: .infinity)
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .cornerRadius(8)
+                    .animation(.easeInOut(duration: 0.2), value: height)
+            }
         }
         .padding(.vertical, 4)
         .sheet(isPresented: $showExpanded) {
@@ -157,6 +174,7 @@ struct MermaidExpandedView: View {
     let source: String
     @Environment(\.dismiss) private var dismiss
     @State private var renderedHeight: CGFloat = 400
+    @State private var hasError = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -181,7 +199,7 @@ struct MermaidExpandedView: View {
             Divider()
 
             // Interactive diagram area with zoom/pan
-            MermaidWebView(source: source, renderedHeight: $renderedHeight, allowsInteraction: true)
+            MermaidWebView(source: source, renderedHeight: $renderedHeight, hasError: $hasError, allowsInteraction: true)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .textBackgroundColor))
         }

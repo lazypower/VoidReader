@@ -4,7 +4,7 @@
 - [x] 1.1 Download mermaid.min.js (specific version)
 - [x] 1.2 Add to Xcode project as bundle resource
 - [x] 1.3 Create HTML template for rendering
-- [ ] 1.4 Verify resources load at runtime
+- [x] 1.4 Verify resources load at runtime
 
 ## 2. Mermaid Block Detection
 - [x] 2.1 Extend markdown parser to identify mermaid code blocks
@@ -16,7 +16,7 @@
 - [x] 3.2 Load HTML template with bundled mermaid.js
 - [x] 3.3 Inject mermaid source code for rendering
 - [x] 3.4 Handle render completion callback
-- [ ] 3.5 Size WebView to fit rendered diagram
+- [x] 3.5 Size WebView to fit rendered diagram
 
 ## 4. Integration
 - [x] 4.1 Create MermaidBlockView SwiftUI component
