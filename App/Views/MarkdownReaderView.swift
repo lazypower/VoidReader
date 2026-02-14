@@ -41,6 +41,14 @@ struct MarkdownReaderView: View {
     }
 }
 
+/// Preference key for tracking block positions.
+struct BlockPositionPreferenceKey: PreferenceKey {
+    static var defaultValue: [Int: CGFloat] = [:]
+    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
 /// Renders markdown with block-level anchors for scroll navigation.
 struct MarkdownReaderViewWithAnchors: View {
     let text: String
@@ -49,6 +57,7 @@ struct MarkdownReaderViewWithAnchors: View {
     var searchText: String = ""
     var currentMatchIndex: Int = 0
     var onTaskToggle: ((Int, Bool) -> Void)?
+    var onTopBlockChange: ((Int) -> Void)?
 
     var body: some View {
         // Use provided blocks or render if empty (fallback)
@@ -69,9 +78,27 @@ struct MarkdownReaderViewWithAnchors: View {
                     onTaskToggle: onTaskToggle
                 )
                 .id("block-\(index)")
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: BlockPositionPreferenceKey.self,
+                            value: [index: geo.frame(in: .named("reader-scroll")).minY]
+                        )
+                    }
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onPreferenceChange(BlockPositionPreferenceKey.self) { positions in
+            // Find the topmost block that's at or above the top of the viewport
+            let topBlock = positions
+                .filter { $0.value <= 60 } // Within ~60pt of top (accounting for padding)
+                .max(by: { $0.value < $1.value }) // Highest Y value still above threshold
+
+            if let blockIndex = topBlock?.key {
+                onTopBlockChange?(blockIndex)
+            }
+        }
     }
 
     struct MatchInfo {

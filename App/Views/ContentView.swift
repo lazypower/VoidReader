@@ -272,6 +272,30 @@ struct ContentView: View {
         }
     }
 
+    /// Finds the heading that corresponds to (or precedes) the given block index.
+    private func headingForBlock(_ blockIndex: Int) -> HeadingInfo? {
+        // Build mapping of heading -> block index
+        var headingBlocks: [(heading: HeadingInfo, blockIndex: Int)] = []
+        for heading in headings {
+            if let idx = MarkdownReaderViewWithAnchors.blockIndex(for: heading.text, in: renderedBlocks) {
+                headingBlocks.append((heading, idx))
+            }
+        }
+
+        // Find the last heading whose block is <= the current block
+        let preceding = headingBlocks.filter { $0.blockIndex <= blockIndex }
+        return preceding.last?.heading
+    }
+
+    private func updateCurrentHeading(forBlockIndex blockIndex: Int) {
+        if let heading = headingForBlock(blockIndex) {
+            // Only update if different to avoid unnecessary state changes
+            if selectedHeadingID != heading.id {
+                selectedHeadingID = heading.id
+            }
+        }
+    }
+
     // MARK: - Find Bar
 
     private func showFind() {
@@ -406,14 +430,15 @@ struct ContentView: View {
                         blocks: renderedBlocks,
                         searchText: searchText,
                         currentMatchIndex: currentMatchIndex,
-                        onTaskToggle: handleTaskToggle
+                        onTaskToggle: handleTaskToggle,
+                        onTopBlockChange: updateCurrentHeading
                     )
                     .padding(40)
                     .frame(maxWidth: 720, alignment: .leading)
                     .background(
                         GeometryReader { geo in
                             Color.clear
-                                .preference(key: ScrollOffsetPreferenceKey.self, value: geo.frame(in: .named("scroll")).minY)
+                                .preference(key: ScrollOffsetPreferenceKey.self, value: geo.frame(in: .named("reader-scroll")).minY)
                                 .onAppear {
                                     contentHeight = geo.size.height
                                 }
@@ -421,7 +446,7 @@ struct ContentView: View {
                     )
                 }
             }
-            .coordinateSpace(name: "scroll")
+            .coordinateSpace(name: "reader-scroll")
             .onPreferenceChange(ScrollOffsetPreferenceKey.self) { offset in
                 scrollOffset = -offset
             }
