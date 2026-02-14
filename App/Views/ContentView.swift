@@ -517,10 +517,27 @@ struct ContentView: View {
                 .focused($isEditorFocused)
 
             // Preview (uses debounced text and cached blocks for performance)
-            ScrollView {
-                MarkdownReaderView(text: debouncedText, blocks: renderedBlocks, onTaskToggle: handleTaskToggle)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    MarkdownReaderViewWithAnchors(
+                        text: debouncedText,
+                        headings: headings,
+                        blocks: renderedBlocks,
+                        onTaskToggle: handleTaskToggle
+                    )
                     .padding(40)
                     .frame(maxWidth: 720, alignment: .leading)
+                }
+                .onChange(of: scrollToHeadingIndex) { _, newIndex in
+                    if let index = newIndex {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            proxy.scrollTo("block-\(index)", anchor: .top)
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            scrollToHeadingIndex = nil
+                        }
+                    }
+                }
             }
             .frame(minWidth: 200)
             .frame(maxWidth: .infinity)
