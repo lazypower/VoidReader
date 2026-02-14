@@ -27,7 +27,7 @@
 - [x] 3.3 Create OutlineSidebar view component
 - [x] 3.4 Display heading hierarchy with indentation
 - [x] 3.5 Click heading to scroll to location (scrolls to block containing heading)
-- [ ] 3.6 Highlight current section based on scroll position
+- [x] 3.6 Highlight current section based on scroll position
 - [x] 3.7 Implement Cmd+Shift+O to toggle sidebar
 - [x] 3.8 Remember sidebar state per window (@AppStorage)
 - [x] 3.9 Animate sidebar show/hide
@@ -38,9 +38,9 @@
 - [ ] 4.3 Tab moves focus between find bar fields
 
 ## 5. Testing
-- [ ] 5.1 Test find with various queries
-- [ ] 5.2 Test find wraps around document
-- [ ] 5.3 Test replace single and all
-- [ ] 5.4 Test outline extracts all heading levels
-- [ ] 5.5 Test outline click scrolls accurately
-- [ ] 5.6 Test current section highlighting updates on scroll
+- [x] 5.1 Test find with various queries
+- [x] 5.2 Test find wraps around document
+- [ ] 5.3 Test replace single and all (UI-level, covered by vibe check)
+- [x] 5.4 Test outline extracts all heading levels
+- [ ] 5.5 Test outline click scrolls accurately (UI-level, covered by vibe check)
+- [ ] 5.6 Test current section highlighting updates on scroll (UI-level, covered by vibe check)
