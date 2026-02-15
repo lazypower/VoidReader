@@ -91,10 +91,18 @@ Future: User themes discovered from `~/Library/Application Support/VoidReader/Th
 SwiftUI's `TextEditor` only binds to `String`, not `AttributedString`. For syntax highlighting:
 
 1. Create `SyntaxHighlightingEditor` as `NSViewRepresentable` wrapping `NSTextView`
-2. Use `NSTextStorage` subclass with regex-based pattern matching
-3. For System theme: use NSColor semantic colors for syntax tokens
-4. For Catppuccin: use palette accent colors (mauve, blue, green, etc.)
-5. Debounce highlighting for performance
+2. **Reuse swift-markdown parser** - same parser used for preview rendering
+3. Walk AST and use `SourceRange` on each node to get positions in source text
+4. Apply theme colors based on node type (Heading, Emphasis, Link, CodeBlock, etc.)
+5. For System theme: use NSColor semantic colors for syntax tokens
+6. For Catppuccin: use palette accent colors (mauve, blue, green, etc.)
+7. Debounce re-parsing for performance (already doing this for preview)
+
+**Why AST over Regex:**
+- swift-markdown already parses GFM (tables, task lists, strikethrough)
+- AST understands context (no false positives on escaped chars, code blocks, etc.)
+- Single source of truth - same parser for highlighting AND rendering
+- No brittle regex maintenance
 
 ## Decisions
 
