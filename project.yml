@@ -11,7 +11,7 @@ settings:
   base:
     SWIFT_VERSION: "5.9"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
-    DEVELOPMENT_TEAM: 8TYK86NGVA
+    DEVELOPMENT_TEAM: KAJX3B69UF
 
 packages:
   VoidReaderCore:
@@ -43,6 +43,7 @@ targets:
         INFOPLIST_FILE: App/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: KAJX3B69UF
         COMBINE_HIDPI_IMAGES: YES
         ENABLE_HARDENED_RUNTIME: YES
     info:
@@ -82,6 +83,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.voidreader.app.quicklook
         PRODUCT_NAME: VoidReaderQuickLook
         CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: KAJX3B69UF
         SKIP_INSTALL: YES
         LD_RUNPATH_SEARCH_PATHS:
           - $(inherited)

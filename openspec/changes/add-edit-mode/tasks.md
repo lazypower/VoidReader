@@ -9,14 +9,14 @@
 ## 2. Split Pane Layout
 - [x] 2.1 Create HSplitView with source and preview panes
 - [x] 2.2 Add draggable divider
-- [ ] 2.3 Remember divider position per window
+- [x] 2.3 Remember divider position per window
 - [x] 2.4 Set sensible default split (50/50)
 
 ## 3. Source Editor
 - [x] 3.1 Create TextEditor for markdown source
 - [x] 3.2 Use monospace font for source
-- [ ] 3.3 Add line numbers (optional)
-- [ ] 3.4 Implement basic syntax highlighting
+- [~] 3.3 Add line numbers (optional) - deferred
+- [~] 3.4 Implement basic syntax highlighting - moved to Theming
 - [x] 3.5 Bind to document text for saving
 
 ## 4. Live Preview
@@ -26,14 +26,11 @@
 - [x] 4.4 Handle rapid typing gracefully
 
 ## 5. Scroll Sync (Optional)
-- [ ] 5.1 Track scroll position in source editor
-- [ ] 5.2 Map source lines to preview positions
-- [ ] 5.3 Sync preview scroll to approximate position
-- [ ] 5.4 Add preference to enable/disable sync
+- [~] 5.1-5.4 Scroll sync - deferred (not worth complexity for reader-first app)
 
 ## 6. Polish
 - [x] 6.1 Focus source editor when entering edit mode
-- [ ] 6.2 Restore scroll position when exiting edit mode
+- [x] 6.2 Restore scroll position when exiting edit mode
 - [x] 6.3 Show unsaved indicator in title bar (handled by macOS DocumentGroup)
 
 ## 7. Status Bar
@@ -42,7 +39,7 @@
 - [x] 7.3 Calculate character count
 - [x] 7.4 Calculate reading time (~200 wpm)
 - [x] 7.5 Update stats on document change (debounced)
-- [ ] 7.6 Show selection stats when text selected
+- [~] 7.6 Show selection stats when text selected - deferred (needs NSTextView wrapper)
 - [x] 7.7 Add status bar toggle to View menu (Cmd+Shift+/)
 - [x] 7.8 Persist preference (@AppStorage)
 
@@ -63,12 +60,12 @@
 
 ## 10. Testing
 - [x] 10.1 Test mode toggle preserves content
-- [ ] 10.2 Test divider drag and persistence
+- [x] 10.2 Test divider drag and persistence
 - [x] 10.3 Test live preview updates
 - [x] 10.4 Test save from edit mode
 - [x] 10.5 Test cheat sheet appears/dismisses correctly
 - [x] 10.6 Test cheat sheet works in both modes
 - [x] 10.7 Test status bar updates correctly
-- [ ] 10.8 Test status bar toggle in preferences
-- [ ] 10.9 Test distraction-free mode enter/exit
-- [ ] 10.10 Test hover controls in distraction-free
+- [x] 10.8 Test status bar toggle in preferences (vibe check)
+- [x] 10.9 Test distraction-free mode enter/exit (vibe check)
+- [x] 10.10 Test hover controls in distraction-free (vibe check)

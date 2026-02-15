@@ -10,6 +10,7 @@ struct ContentView: View {
     @State private var isEditMode = false
     @AppStorage("showStatusBar") private var showStatusBar = true
     @AppStorage("showOutlineSidebar") private var showOutlineSidebar = false
+    @SceneStorage("editorSplitFraction") private var editorSplitFraction: Double = 0.5
     @State private var showCheatSheet = false
     @State private var isDistractionFree = false
     @State private var documentStats: DocumentStats
@@ -37,6 +38,8 @@ struct ContentView: View {
     @State private var scrollOffset: CGFloat = 0
     @State private var contentHeight: CGFloat = 0
     @State private var scrollProxy: ScrollViewProxy?
+    @State private var savedScrollBlockIndex: Int?
+    @State private var currentTopBlockIndex: Int = 0
 
     // Find bar
     @State private var showFindBar = false
@@ -278,6 +281,10 @@ struct ContentView: View {
 
             ToolbarItem(placement: .primaryAction) {
                 Button {
+                    if !isEditMode {
+                        // Entering edit mode - save current scroll position
+                        savedScrollBlockIndex = currentTopBlockIndex
+                    }
                     withAnimation(.easeInOut(duration: 0.2)) {
                         isEditMode.toggle()
                     }
@@ -285,6 +292,12 @@ struct ContentView: View {
                         // Focus editor after animation
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                             isEditorFocused = true
+                        }
+                    } else {
+                        // Exiting edit mode - restore scroll position
+                        if let blockIndex = savedScrollBlockIndex {
+                            scrollToHeadingIndex = blockIndex
+                            savedScrollBlockIndex = nil
                         }
                     }
                 } label: {
@@ -346,6 +359,7 @@ struct ContentView: View {
     }
 
     private func updateCurrentHeading(forBlockIndex blockIndex: Int) {
+        currentTopBlockIndex = blockIndex
         if let heading = headingForBlock(blockIndex) {
             // Only update if different to avoid unnecessary state changes
             if selectedHeadingID != heading.id {
@@ -656,13 +670,17 @@ struct ContentView: View {
     }
 
     private var editorView: some View {
-        HSplitView {
+        ResizableSplitView(
+            leftFraction: Binding(
+                get: { CGFloat(editorSplitFraction) },
+                set: { editorSplitFraction = Double($0) }
+            )
+        ) {
             // Source editor
             TextEditor(text: $document.text)
                 .font(.system(.body, design: .monospaced))
-                .frame(minWidth: 200)
                 .focused($isEditorFocused)
-
+        } right: {
             // Preview (uses debounced text and cached blocks for performance)
             ScrollViewReader { proxy in
                 ScrollView {
@@ -687,8 +705,6 @@ struct ContentView: View {
                     }
                 }
             }
-            .frame(minWidth: 200)
-            .frame(maxWidth: .infinity)
             .background(Color(nsColor: .textBackgroundColor))
         }
     }
