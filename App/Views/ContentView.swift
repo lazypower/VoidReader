@@ -85,10 +85,13 @@ struct ContentView: View {
                     isActive: $isDistractionFree,
                     isEditMode: isEditMode
                 )
+                .transition(.opacity)
             } else {
                 normalView
+                    .transition(.opacity)
             }
         }
+        .animation(.easeInOut(duration: 0.25), value: isDistractionFree)
         .frame(minWidth: 600, minHeight: 400)
         .overlay {
             if showCheatSheet {

@@ -155,8 +155,14 @@ struct MermaidWebView: NSViewRepresentable {
 struct MermaidBlockView: View {
     let data: MermaidData
     var onExpand: ((String) -> Void)? = nil
-    @State private var height: CGFloat = 100 // Start smaller, will expand
+    @State private var renderedHeight: CGFloat = 0
     @State private var hasError = false
+    @State private var isRendered = false
+
+    // Display height animates from 0 to final height
+    private var displayHeight: CGFloat {
+        isRendered ? renderedHeight : 0
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -168,7 +174,7 @@ struct MermaidBlockView: View {
                     .font(.caption)
                     .foregroundColor(hasError ? .orange : .secondary)
                 Spacer()
-                if !hasError {
+                if !hasError && isRendered {
                     Button {
                         onExpand?(data.source)
                     } label: {
@@ -185,16 +191,24 @@ struct MermaidBlockView: View {
                 // Fallback: show raw mermaid code
                 CodeBlockView(data: CodeBlockData(code: data.source, language: "mermaid"))
             } else {
-                // WebView - height adjusts to content
-                MermaidWebView(source: data.source, renderedHeight: $height, hasError: $hasError)
-                    .frame(height: height)
+                // WebView - grows in smoothly when rendered
+                MermaidWebView(source: data.source, renderedHeight: $renderedHeight, hasError: $hasError)
+                    .frame(height: max(displayHeight, 1)) // min 1 to keep WebView alive
                     .frame(maxWidth: .infinity)
                     .background(Color(nsColor: .controlBackgroundColor))
                     .cornerRadius(8)
-                    .animation(.easeInOut(duration: 0.2), value: height)
+                    .opacity(isRendered ? 1 : 0)
+                    .clipped()
             }
         }
         .padding(.vertical, 4)
+        .animation(.easeInOut(duration: 0.35), value: isRendered)
+        .onChange(of: renderedHeight) { _, newValue in
+            // Mark as rendered once we get real dimensions
+            if newValue > 0 && !isRendered {
+                isRendered = true
+            }
+        }
     }
 }
 
