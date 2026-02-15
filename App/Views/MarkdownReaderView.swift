@@ -59,6 +59,8 @@ struct MarkdownReaderViewWithAnchors: View {
     let headings: [HeadingInfo]
     var blocks: [MarkdownBlock] = []
     var searchText: String = ""
+    var caseSensitive: Bool = false
+    var useRegex: Bool = false
     var currentMatchIndex: Int = 0
     var onTaskToggle: ((Int, Bool) -> Void)?
     var onTopBlockChange: ((Int) -> Void)?
@@ -122,7 +124,12 @@ struct MarkdownReaderViewWithAnchors: View {
             guard case .text(let attrString) = block else { continue }
 
             let blockText = String(attrString.characters)
-            let matches = TextSearcher.findMatches(query: searchText, in: blockText)
+            let matches = TextSearcher.findMatches(
+                query: searchText,
+                in: blockText,
+                caseSensitive: caseSensitive,
+                useRegex: useRegex
+            )
 
             if !matches.isEmpty {
                 info.blockMatches[blockIdx] = matches.map { $0.range }
@@ -146,7 +153,13 @@ struct MarkdownReaderViewWithAnchors: View {
     }
 
     /// Finds which block contains the Nth match (0-indexed).
-    static func blockIndexForMatch(_ matchIndex: Int, searchText: String, in blocks: [MarkdownBlock]) -> Int? {
+    static func blockIndexForMatch(
+        _ matchIndex: Int,
+        searchText: String,
+        caseSensitive: Bool = false,
+        useRegex: Bool = false,
+        in blocks: [MarkdownBlock]
+    ) -> Int? {
         guard !searchText.isEmpty else { return nil }
 
         var globalMatchIndex = 0
@@ -155,7 +168,12 @@ struct MarkdownReaderViewWithAnchors: View {
             guard case .text(let attrString) = block else { continue }
 
             let blockText = String(attrString.characters)
-            let matches = TextSearcher.findMatches(query: searchText, in: blockText)
+            let matches = TextSearcher.findMatches(
+                query: searchText,
+                in: blockText,
+                caseSensitive: caseSensitive,
+                useRegex: useRegex
+            )
 
             if globalMatchIndex + matches.count > matchIndex {
                 return blockIdx

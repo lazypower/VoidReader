@@ -7,6 +7,9 @@ struct OutlineSidebarView: View {
     let onHeadingTap: (HeadingInfo) -> Void
     var currentHeadingID: UUID?
 
+    @State private var selectedIndex: Int?
+    @FocusState private var isFocused: Bool
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
@@ -31,22 +34,70 @@ struct OutlineSidebarView: View {
                 }
                 .frame(maxWidth: .infinity)
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(headings) { heading in
-                            OutlineRow(
-                                heading: heading,
-                                isCurrentSection: heading.id == currentHeadingID,
-                                onTap: { onHeadingTap(heading) }
-                            )
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 2) {
+                            ForEach(Array(headings.enumerated()), id: \.element.id) { index, heading in
+                                OutlineRow(
+                                    heading: heading,
+                                    isCurrentSection: heading.id == currentHeadingID,
+                                    isKeyboardSelected: isFocused && selectedIndex == index,
+                                    onTap: {
+                                        selectedIndex = index
+                                        onHeadingTap(heading)
+                                    }
+                                )
+                                .id(index)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .onChange(of: selectedIndex) { _, newIndex in
+                        if let index = newIndex {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                proxy.scrollTo(index, anchor: .center)
+                            }
                         }
                     }
-                    .padding(.vertical, 4)
+                }
+                .focusable()
+                .focused($isFocused)
+                .onKeyPress(.downArrow) {
+                    moveSelection(by: 1)
+                    return .handled
+                }
+                .onKeyPress(.upArrow) {
+                    moveSelection(by: -1)
+                    return .handled
+                }
+                .onKeyPress(.return) {
+                    if let index = selectedIndex, index < headings.count {
+                        onHeadingTap(headings[index])
+                    }
+                    return .handled
                 }
             }
         }
         .frame(width: 220)
         .background(Color(nsColor: .controlBackgroundColor))
+        .onChange(of: currentHeadingID) { _, newID in
+            // Sync keyboard selection with scroll-based current heading
+            if let id = newID, let index = headings.firstIndex(where: { $0.id == id }) {
+                selectedIndex = index
+            }
+        }
+    }
+
+    private func moveSelection(by offset: Int) {
+        guard !headings.isEmpty else { return }
+
+        if let current = selectedIndex {
+            let newIndex = max(0, min(headings.count - 1, current + offset))
+            selectedIndex = newIndex
+        } else {
+            // No selection yet, start at beginning or end
+            selectedIndex = offset > 0 ? 0 : headings.count - 1
+        }
     }
 }
 
@@ -54,6 +105,7 @@ struct OutlineSidebarView: View {
 private struct OutlineRow: View {
     let heading: HeadingInfo
     let isCurrentSection: Bool
+    var isKeyboardSelected: Bool = false
     let onTap: () -> Void
 
     var body: some View {
@@ -71,11 +123,24 @@ private struct OutlineRow: View {
             .padding(.leading, indentForLevel(heading.level))
             .padding(.trailing, 8)
             .padding(.vertical, 4)
-            .background(isCurrentSection ? Color.accentColor.opacity(0.1) : Color.clear)
+            .background(backgroundColor)
             .cornerRadius(4)
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(isKeyboardSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+            )
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 8)
+    }
+
+    private var backgroundColor: Color {
+        if isKeyboardSelected {
+            return Color.accentColor.opacity(0.2)
+        } else if isCurrentSection {
+            return Color.accentColor.opacity(0.1)
+        }
+        return Color.clear
     }
 
     private func indentForLevel(_ level: Int) -> CGFloat {

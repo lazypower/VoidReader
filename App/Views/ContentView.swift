@@ -43,6 +43,8 @@ struct ContentView: View {
     @State private var showReplace = false
     @State private var searchText = ""
     @State private var replaceText = ""
+    @State private var caseSensitive = false
+    @State private var useRegex = false
     @State private var searchMatches: [TextSearcher.Match] = []
     @State private var currentMatchIndex = 0
 
@@ -158,6 +160,12 @@ struct ContentView: View {
         .onChange(of: searchText) { _, _ in
             updateSearch()
         }
+        .onChange(of: caseSensitive) { _, _ in
+            updateSearch()
+        }
+        .onChange(of: useRegex) { _, _ in
+            updateSearch()
+        }
         .background(
             ShareSheetPresenter(isPresented: $showingShare, items: [document.text])
         )
@@ -214,8 +222,11 @@ struct ContentView: View {
                         isVisible: $showFindBar,
                         searchText: $searchText,
                         replaceText: $replaceText,
+                        caseSensitive: $caseSensitive,
+                        useRegex: $useRegex,
                         matchCount: searchMatches.count,
                         currentMatch: searchMatches.isEmpty ? 0 : currentMatchIndex + 1,
+                        currentMatchText: currentMatchText,
                         isEditMode: isEditMode,
                         showReplace: showReplace,
                         onNext: findNext,
@@ -362,6 +373,20 @@ struct ContentView: View {
         }
     }
 
+    /// The text of the current match (for replacement preview).
+    private var currentMatchText: String? {
+        guard !searchMatches.isEmpty, currentMatchIndex < searchMatches.count else { return nil }
+        let matches = TextSearcher.findMatches(
+            query: searchText,
+            in: document.text,
+            caseSensitive: caseSensitive,
+            useRegex: useRegex
+        )
+        guard currentMatchIndex < matches.count else { return nil }
+        let match = matches[currentMatchIndex]
+        return String(document.text[match.range])
+    }
+
     private func showFindAndReplace() {
         withAnimation(.easeInOut(duration: 0.15)) {
             showFindBar = true
@@ -387,7 +412,12 @@ struct ContentView: View {
         for block in renderedBlocks {
             if case .text(let attrString) = block {
                 let blockText = String(attrString.characters)
-                let matches = TextSearcher.findMatches(query: searchText, in: blockText)
+                let matches = TextSearcher.findMatches(
+                    query: searchText,
+                    in: blockText,
+                    caseSensitive: caseSensitive,
+                    useRegex: useRegex
+                )
                 allMatches.append(contentsOf: matches)
             }
         }
@@ -410,7 +440,12 @@ struct ContentView: View {
 
         // Replace the current match in the document text
         // We need to find the actual position in the raw text
-        let matches = TextSearcher.findMatches(query: searchText, in: document.text)
+        let matches = TextSearcher.findMatches(
+            query: searchText,
+            in: document.text,
+            caseSensitive: caseSensitive,
+            useRegex: useRegex
+        )
         guard currentMatchIndex < matches.count else { return }
 
         let match = matches[currentMatchIndex]
@@ -431,7 +466,12 @@ struct ContentView: View {
         guard !searchText.isEmpty, !searchMatches.isEmpty else { return }
 
         // Replace all occurrences (work backwards to preserve indices)
-        let matches = TextSearcher.findMatches(query: searchText, in: document.text)
+        let matches = TextSearcher.findMatches(
+            query: searchText,
+            in: document.text,
+            caseSensitive: caseSensitive,
+            useRegex: useRegex
+        )
         var newText = document.text
 
         for match in matches.reversed() {
@@ -447,6 +487,8 @@ struct ContentView: View {
         if let blockIdx = MarkdownReaderViewWithAnchors.blockIndexForMatch(
             matchIndex,
             searchText: searchText,
+            caseSensitive: caseSensitive,
+            useRegex: useRegex,
             in: renderedBlocks
         ) {
             withAnimation(.easeInOut(duration: 0.2)) {
@@ -531,6 +573,8 @@ struct ContentView: View {
                         headings: headings,
                         blocks: renderedBlocks,
                         searchText: searchText,
+                        caseSensitive: caseSensitive,
+                        useRegex: useRegex,
                         currentMatchIndex: currentMatchIndex,
                         onTaskToggle: handleTaskToggle,
                         onTopBlockChange: updateCurrentHeading,

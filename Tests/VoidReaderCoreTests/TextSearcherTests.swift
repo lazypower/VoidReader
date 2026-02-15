@@ -127,4 +127,68 @@ struct TextSearcherTests {
         #expect(ranges.count == 1)
         #expect(ranges[0].1 == false)
     }
+
+    // MARK: - Regex Search
+
+    @Test("Regex finds simple pattern")
+    func regexFindsSimplePattern() {
+        let text = "cat bat rat sat"
+        let matches = TextSearcher.findMatches(query: "[cbrs]at", in: text, useRegex: true)
+        #expect(matches.count == 4)
+    }
+
+    @Test("Regex finds digit patterns")
+    func regexFindsDigits() {
+        let text = "Order 123 and order 456"
+        let matches = TextSearcher.findMatches(query: "\\d+", in: text, useRegex: true)
+        #expect(matches.count == 2)
+        #expect(String(text[matches[0].range]) == "123")
+        #expect(String(text[matches[1].range]) == "456")
+    }
+
+    @Test("Regex respects case sensitivity")
+    func regexRespectsCaseSensitivity() {
+        let text = "Hello HELLO hello"
+        let matchesInsensitive = TextSearcher.findMatches(
+            query: "hello",
+            in: text,
+            caseSensitive: false,
+            useRegex: true
+        )
+        #expect(matchesInsensitive.count == 3)
+
+        let matchesSensitive = TextSearcher.findMatches(
+            query: "hello",
+            in: text,
+            caseSensitive: true,
+            useRegex: true
+        )
+        #expect(matchesSensitive.count == 1)
+    }
+
+    @Test("Invalid regex returns no matches")
+    func invalidRegexReturnsEmpty() {
+        let text = "Hello world"
+        let matches = TextSearcher.findMatches(query: "[invalid", in: text, useRegex: true)
+        #expect(matches.isEmpty)
+    }
+
+    @Test("Regex with groups")
+    func regexWithGroups() {
+        let text = "email@example.com and test@test.org"
+        let matches = TextSearcher.findMatches(
+            query: "\\w+@\\w+\\.\\w+",
+            in: text,
+            useRegex: true
+        )
+        #expect(matches.count == 2)
+    }
+
+    @Test("Regex word boundaries")
+    func regexWordBoundaries() {
+        let text = "cat catalog caterpillar"
+        let matches = TextSearcher.findMatches(query: "\\bcat\\b", in: text, useRegex: true)
+        #expect(matches.count == 1)
+        #expect(String(text[matches[0].range]) == "cat")
+    }
 }

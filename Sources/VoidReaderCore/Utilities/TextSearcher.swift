@@ -18,13 +18,19 @@ public struct TextSearcher {
     ///   - query: The search term
     ///   - text: The text to search in
     ///   - caseSensitive: Whether the search is case-sensitive
+    ///   - useRegex: Whether to treat the query as a regular expression
     /// - Returns: Array of matches
     public static func findMatches(
         query: String,
         in text: String,
-        caseSensitive: Bool = false
+        caseSensitive: Bool = false,
+        useRegex: Bool = false
     ) -> [Match] {
         guard !query.isEmpty else { return [] }
+
+        if useRegex {
+            return findRegexMatches(query: query, in: text, caseSensitive: caseSensitive)
+        }
 
         var matches: [Match] = []
         let searchText = caseSensitive ? text : text.lowercased()
@@ -47,14 +53,40 @@ public struct TextSearcher {
         return matches
     }
 
+    /// Finds matches using regular expression.
+    private static func findRegexMatches(
+        query: String,
+        in text: String,
+        caseSensitive: Bool
+    ) -> [Match] {
+        var options: NSRegularExpression.Options = []
+        if !caseSensitive {
+            options.insert(.caseInsensitive)
+        }
+
+        guard let regex = try? NSRegularExpression(pattern: query, options: options) else {
+            return [] // Invalid regex, return no matches
+        }
+
+        let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+        let results = regex.matches(in: text, options: [], range: nsRange)
+
+        return results.compactMap { result in
+            guard let range = Range(result.range, in: text) else { return nil }
+            let lineNumber = text[..<range.lowerBound].filter { $0 == "\n" }.count + 1
+            return Match(range: range, lineNumber: lineNumber)
+        }
+    }
+
     /// Returns the text with the current match highlighted using markers.
     /// Useful for creating highlighted AttributedStrings.
     public static func highlightedRanges(
         query: String,
         in text: String,
-        caseSensitive: Bool = false
+        caseSensitive: Bool = false,
+        useRegex: Bool = false
     ) -> [(Range<String.Index>, Bool)] {
-        let matches = findMatches(query: query, in: text, caseSensitive: caseSensitive)
+        let matches = findMatches(query: query, in: text, caseSensitive: caseSensitive, useRegex: useRegex)
         guard !matches.isEmpty else {
             return [(text.startIndex..<text.endIndex, false)]
         }

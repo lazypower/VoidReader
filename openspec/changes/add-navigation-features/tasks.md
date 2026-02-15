@@ -10,15 +10,15 @@
 - [x] 1.7 Implement Enter/Shift+Enter for next/previous match
 - [x] 1.8 Implement Cmd+G / Cmd+Shift+G for next/previous
 - [x] 1.9 Scroll to and highlight current match
-- [ ] 1.10 Support case-sensitive toggle
-- [ ] 1.11 Support regex toggle (optional)
+- [x] 1.10 Support case-sensitive toggle
+- [x] 1.11 Support regex toggle (optional)
 
 ## 2. Find & Replace (Edit Mode)
 - [x] 2.1 Extend FindBar with replace field
 - [x] 2.2 Implement Cmd+H to show find & replace
 - [x] 2.3 Replace current match button
 - [x] 2.4 Replace all matches button
-- [ ] 2.5 Show replacement preview
+- [x] 2.5 Show replacement preview
 - [x] 2.6 Only enable in edit mode
 
 ## 3. Outline/TOC Sidebar
@@ -33,14 +33,14 @@
 - [x] 3.9 Animate sidebar show/hide
 
 ## 4. Keyboard Navigation
-- [ ] 4.1 Arrow keys navigate outline when focused
-- [ ] 4.2 Enter jumps to selected heading
-- [ ] 4.3 Tab moves focus between find bar fields
+- [x] 4.1 Arrow keys navigate outline when focused
+- [x] 4.2 Enter jumps to selected heading
+- [x] 4.3 Tab moves focus between find bar fields
 
 ## 5. Testing
 - [x] 5.1 Test find with various queries
 - [x] 5.2 Test find wraps around document
-- [ ] 5.3 Test replace single and all (UI-level, covered by vibe check)
+- [x] 5.3 Test replace single and all (UI-level, covered by vibe check)
 - [x] 5.4 Test outline extracts all heading levels
-- [ ] 5.5 Test outline click scrolls accurately (UI-level, covered by vibe check)
-- [ ] 5.6 Test current section highlighting updates on scroll (UI-level, covered by vibe check)
+- [x] 5.5 Test outline click scrolls accurately (UI-level, covered by vibe check)
+- [x] 5.6 Test current section highlighting updates on scroll (UI-level, covered by vibe check)

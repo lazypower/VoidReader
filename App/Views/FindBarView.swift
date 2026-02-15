@@ -5,8 +5,11 @@ struct FindBarView: View {
     @Binding var isVisible: Bool
     @Binding var searchText: String
     @Binding var replaceText: String
+    @Binding var caseSensitive: Bool
+    @Binding var useRegex: Bool
     let matchCount: Int
     let currentMatch: Int
+    let currentMatchText: String?
     let isEditMode: Bool
     let showReplace: Bool
     let onNext: () -> Void
@@ -17,7 +20,7 @@ struct FindBarView: View {
 
     @FocusState private var focusedField: Field?
 
-    enum Field {
+    enum Field: Hashable {
         case search, replace
     }
 
@@ -66,6 +69,25 @@ struct FindBarView: View {
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
                         .frame(minWidth: 60)
+                }
+
+                // Search options
+                HStack(spacing: 4) {
+                    Toggle(isOn: $caseSensitive) {
+                        Text("Aa")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    }
+                    .toggleStyle(.button)
+                    .buttonStyle(.borderless)
+                    .help("Case Sensitive")
+
+                    Toggle(isOn: $useRegex) {
+                        Text(".*")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    }
+                    .toggleStyle(.button)
+                    .buttonStyle(.borderless)
+                    .help("Regular Expression")
                 }
 
                 // Navigation buttons
@@ -128,6 +150,26 @@ struct FindBarView: View {
                     )
                     .frame(width: 220)
 
+                    // Replacement preview
+                    if let matchText = currentMatchText, matchCount > 0 {
+                        HStack(spacing: 4) {
+                            Text(matchText)
+                                .strikethrough()
+                                .foregroundColor(.secondary)
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                            Text(replaceText.isEmpty ? "(empty)" : replaceText)
+                                .foregroundColor(replaceText.isEmpty ? .secondary : .primary)
+                        }
+                        .font(.system(size: 11))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .cornerRadius(4)
+                        .lineLimit(1)
+                    }
+
                     // Replace buttons
                     Button("Replace") {
                         onReplace()
@@ -153,6 +195,18 @@ struct FindBarView: View {
         .onAppear {
             focusedField = .search
         }
+        .onKeyPress(.tab) {
+            // Tab cycles between search and replace fields
+            if showReplace && isEditMode {
+                if focusedField == .search {
+                    focusedField = .replace
+                } else {
+                    focusedField = .search
+                }
+                return .handled
+            }
+            return .ignored
+        }
     }
 
     private var matchCountText: String {
@@ -172,8 +226,11 @@ struct FindBarView: View {
             isVisible: .constant(true),
             searchText: .constant("test"),
             replaceText: .constant(""),
+            caseSensitive: .constant(false),
+            useRegex: .constant(false),
             matchCount: 12,
             currentMatch: 3,
+            currentMatchText: nil,
             isEditMode: false,
             showReplace: false,
             onNext: {},
@@ -193,8 +250,11 @@ struct FindBarView: View {
             isVisible: .constant(true),
             searchText: .constant("test"),
             replaceText: .constant("replacement"),
+            caseSensitive: .constant(true),
+            useRegex: .constant(false),
             matchCount: 12,
             currentMatch: 3,
+            currentMatchText: "test",
             isEditMode: true,
             showReplace: true,
             onNext: {},
@@ -205,5 +265,5 @@ struct FindBarView: View {
         )
         Spacer()
     }
-    .frame(width: 600, height: 120)
+    .frame(width: 700, height: 120)
 }
