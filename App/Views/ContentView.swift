@@ -11,6 +11,7 @@ struct ContentView: View {
     @AppStorage("showStatusBar") private var showStatusBar = true
     @AppStorage("showOutlineSidebar") private var showOutlineSidebar = false
     @SceneStorage("editorSplitFraction") private var editorSplitFraction: Double = 0.5
+    @AppStorage("readerFontSize") private var readerFontSize: Double = 16.0
     @State private var showCheatSheet = false
     @State private var isDistractionFree = false
     @State private var documentStats: DocumentStats
@@ -182,6 +183,20 @@ struct ContentView: View {
             }
             .hidden()
         )
+        .background(
+            // Keyboard shortcuts for font size
+            Group {
+                Button("") { increaseFontSize() }
+                    .keyboardShortcut("+", modifiers: .command)
+                Button("") { increaseFontSize() }
+                    .keyboardShortcut("=", modifiers: .command)
+                Button("") { decreaseFontSize() }
+                    .keyboardShortcut("-", modifiers: .command)
+                Button("") { resetFontSize() }
+                    .keyboardShortcut("0", modifiers: .command)
+            }
+            .hidden()
+        )
         .onExitCommand {
             if showFindBar {
                 dismissFindBar()
@@ -201,6 +216,35 @@ struct ContentView: View {
         // Use document title or fallback
         let suggestedName = "Document.pdf"
         DocumentPrinter.exportPDF(text: document.text, suggestedName: suggestedName, from: window)
+    }
+
+    // MARK: - Font Size
+
+    private static let minFontSize: Double = 10
+    private static let maxFontSize: Double = 32
+    private static let defaultFontSize: Double = 16
+    private static let fontSizeStep: Double = 2
+
+    private var renderStyle: MarkdownRenderer.Style {
+        var style = MarkdownRenderer.Style()
+        style.bodySize = CGFloat(readerFontSize)
+        style.codeSize = CGFloat(readerFontSize * 0.875) // Code slightly smaller
+        return style
+    }
+
+    private func increaseFontSize() {
+        readerFontSize = min(readerFontSize + Self.fontSizeStep, Self.maxFontSize)
+        updateRenderedBlocks(from: document.text)
+    }
+
+    private func decreaseFontSize() {
+        readerFontSize = max(readerFontSize - Self.fontSizeStep, Self.minFontSize)
+        updateRenderedBlocks(from: document.text)
+    }
+
+    private func resetFontSize() {
+        readerFontSize = Self.defaultFontSize
+        updateRenderedBlocks(from: document.text)
     }
 
     private var normalView: some View {
@@ -332,7 +376,7 @@ struct ContentView: View {
     }
 
     private func updateRenderedBlocks(from text: String) {
-        renderedBlocks = BlockRenderer.render(text)
+        renderedBlocks = BlockRenderer.render(text, style: renderStyle)
     }
 
     private func scrollToHeading(_ heading: HeadingInfo) {
@@ -590,6 +634,7 @@ struct ContentView: View {
                         caseSensitive: caseSensitive,
                         useRegex: useRegex,
                         currentMatchIndex: currentMatchIndex,
+                        codeFontSize: CGFloat(readerFontSize * 0.875),
                         onTaskToggle: handleTaskToggle,
                         onTopBlockChange: updateCurrentHeading,
                         onMermaidExpand: { source in expandedMermaidSource = source }
@@ -688,6 +733,7 @@ struct ContentView: View {
                         text: debouncedText,
                         headings: headings,
                         blocks: renderedBlocks,
+                        codeFontSize: CGFloat(readerFontSize * 0.875),
                         onTaskToggle: handleTaskToggle,
                         onMermaidExpand: { source in expandedMermaidSource = source }
                     )

@@ -11,6 +11,7 @@ private let highlightr: Highlightr? = {
 /// Renders a code block with syntax highlighting and copy button.
 struct CodeBlockView: View {
     let data: CodeBlockData
+    var fontSize: CGFloat = 13
     @State private var showCopied = false
     @Environment(\.colorScheme) private var colorScheme
 
@@ -19,13 +20,18 @@ struct CodeBlockView: View {
         colorScheme == .dark ? "atom-one-dark" : "atom-one-light"
     }
 
+    // Badge font scales with code font
+    private var badgeFontSize: CGFloat {
+        max(9, fontSize * 0.85)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Language badge + copy button
             HStack {
                 if let language = data.language, !language.isEmpty {
                     Text(language)
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(.system(size: badgeFontSize, weight: .medium, design: .monospaced))
                         .foregroundColor(.secondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -40,7 +46,7 @@ struct CodeBlockView: View {
                         Image(systemName: showCopied ? "checkmark" : "doc.on.doc")
                         if showCopied {
                             Text("Copied")
-                                .font(.system(size: 11))
+                                .font(.system(size: badgeFontSize))
                         }
                     }
                     .foregroundColor(showCopied ? .green : .secondary)
@@ -72,7 +78,7 @@ struct CodeBlockView: View {
         } else {
             // Fallback to plain text
             Text(data.code)
-                .font(.system(size: 13, design: .monospaced))
+                .font(.system(size: fontSize, design: .monospaced))
         }
     }
 
@@ -89,8 +95,18 @@ struct CodeBlockView: View {
             return nil
         }
 
+        // Convert to mutable to adjust font size
+        let mutableAttr = NSMutableAttributedString(attributedString: nsAttr)
+        let fullRange = NSRange(location: 0, length: mutableAttr.length)
+
+        // Update font to use our size while preserving monospace
+        mutableAttr.enumerateAttribute(.font, in: fullRange, options: []) { value, range, _ in
+            let newFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+            mutableAttr.addAttribute(.font, value: newFont, range: range)
+        }
+
         // Convert NSAttributedString to SwiftUI AttributedString
-        return try? AttributedString(nsAttr, including: AttributeScopes.AppKitAttributes.self)
+        return try? AttributedString(mutableAttr, including: AttributeScopes.AppKitAttributes.self)
     }
 
     private func copyCode() {

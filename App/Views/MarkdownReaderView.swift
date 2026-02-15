@@ -5,6 +5,7 @@ import VoidReaderCore
 struct MarkdownReaderView: View {
     let text: String
     var blocks: [MarkdownBlock] = []
+    var codeFontSize: CGFloat = 13
     var onTaskToggle: ((Int, Bool) -> Void)?
     var onMermaidExpand: ((String) -> Void)?
 
@@ -34,7 +35,7 @@ struct MarkdownReaderView: View {
             TaskListView(items: items, onToggle: onTaskToggle)
 
         case .codeBlock(let codeData):
-            CodeBlockView(data: codeData)
+            CodeBlockView(data: codeData, fontSize: codeFontSize)
 
         case .image(let imageData):
             ImageBlockView(data: imageData)
@@ -62,6 +63,7 @@ struct MarkdownReaderViewWithAnchors: View {
     var caseSensitive: Bool = false
     var useRegex: Bool = false
     var currentMatchIndex: Int = 0
+    var codeFontSize: CGFloat = 13
     var onTaskToggle: ((Int, Bool) -> Void)?
     var onTopBlockChange: ((Int) -> Void)?
     var onMermaidExpand: ((String) -> Void)?
@@ -82,6 +84,7 @@ struct MarkdownReaderViewWithAnchors: View {
                     block: block,
                     searchText: searchText,
                     matchRanges: matchInfo.blockMatches[index] ?? [],
+                    codeFontSize: codeFontSize,
                     onTaskToggle: onTaskToggle,
                     onMermaidExpand: onMermaidExpand
                 )
@@ -190,6 +193,7 @@ private struct BlockView: View {
     let block: MarkdownBlock
     var searchText: String = ""
     var matchRanges: [Range<String.Index>] = []
+    var codeFontSize: CGFloat = 13
     var onTaskToggle: ((Int, Bool) -> Void)?
     var onMermaidExpand: ((String) -> Void)?
 
@@ -211,7 +215,7 @@ private struct BlockView: View {
             TaskListView(items: items, onToggle: onTaskToggle)
 
         case .codeBlock(let codeData):
-            CodeBlockView(data: codeData)
+            CodeBlockView(data: codeData, fontSize: codeFontSize)
 
         case .image(let imageData):
             ImageBlockView(data: imageData)
