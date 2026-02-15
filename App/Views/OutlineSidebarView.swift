@@ -80,6 +80,7 @@ struct OutlineSidebarView: View {
         }
         .frame(width: 220)
         .background(Color(nsColor: .controlBackgroundColor))
+        .clipped()
         .onChange(of: currentHeadingID) { _, newID in
             // Sync keyboard selection with scroll-based current heading
             if let id = newID, let index = headings.firstIndex(where: { $0.id == id }) {

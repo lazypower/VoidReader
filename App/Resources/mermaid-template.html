@@ -23,14 +23,17 @@
         #mermaid-container {
             display: flex;
             justify-content: center;
+            align-items: center;
             width: 100%;
+            min-height: 100%;
         }
         #mermaid-container svg {
             max-width: 100%;
             height: auto;
         }
         .mermaid {
-            display: inline-block;
+            display: flex;
+            justify-content: center;
         }
         /* Error styling */
         .error {
@@ -53,12 +56,21 @@
         </pre>
     </div>
     <script>
-        const config = {
+        // Theme configuration - supports both built-in themes and custom themeVariables
+        const baseConfig = {
             startOnLoad: false,
             theme: '{{MERMAID_THEME}}',
             securityLevel: 'strict',
             fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif'
         };
+
+        // Custom theme variables (empty object if using built-in theme)
+        const themeVariables = {{MERMAID_THEME_VARIABLES}};
+
+        // Merge themeVariables if provided
+        const config = Object.keys(themeVariables).length > 0
+            ? { ...baseConfig, themeVariables }
+            : baseConfig;
 
         mermaid.initialize(config);
 

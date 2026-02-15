@@ -14,6 +14,9 @@ struct ContentView: View {
     @AppStorage("readerFontSize") private var readerFontSize: Double = 16.0
     @AppStorage("readerFontFamily") private var readerFontFamily: String = ""
     @AppStorage("codeFontFamily") private var codeFontFamily: String = ""
+    @AppStorage("selectedThemeID") private var selectedThemeID: String = "system"
+    @AppStorage("appearanceOverride") private var appearanceOverride: String = "system"
+    @Environment(\.colorScheme) private var systemColorScheme
     @State private var showCheatSheet = false
     @State private var isDistractionFree = false
     @State private var documentStats: DocumentStats
@@ -178,6 +181,15 @@ struct ContentView: View {
         .onChange(of: codeFontFamily) { _, _ in
             updateRenderedBlocks(from: document.text)
         }
+        .onChange(of: selectedThemeID) { _, _ in
+            updateRenderedBlocks(from: document.text)
+        }
+        .onChange(of: systemColorScheme) { _, _ in
+            updateRenderedBlocks(from: document.text)
+        }
+        .onChange(of: appearanceOverride) { _, _ in
+            updateRenderedBlocks(from: document.text)
+        }
         .background(ShareSheetPresenter(isPresented: $showingShare, items: [document.text]))
         .background(keyboardShortcuts)
         .onExitCommand {
@@ -221,12 +233,38 @@ struct ContentView: View {
             style.codeFontFamily = codeFontFamily
         }
 
+        // Apply theme colors for non-System themes
+        if !currentTheme.isSystemTheme {
+            let palette = currentTheme.palette(for: effectiveColorScheme)
+            style.textColor = palette.text
+            style.secondaryColor = palette.subtext0
+            style.linkColor = palette.blue
+            style.codeBackground = palette.surface0.opacity(0.5)
+        }
+        // For System theme, leave colors as nil to use semantic macOS colors
+
         return style
     }
 
     /// Resolved code font family name (nil = system mono)
     private var resolvedCodeFontFamily: String? {
         codeFontFamily.isEmpty ? nil : codeFontFamily
+    }
+
+    // MARK: - Theme
+
+    /// Current theme from registry
+    private var currentTheme: AppTheme {
+        ThemeRegistry.shared.themeOrDefault(id: selectedThemeID)
+    }
+
+    /// Effective color scheme (respects appearance override)
+    private var effectiveColorScheme: ColorScheme {
+        switch appearanceOverride {
+        case "light": return .light
+        case "dark": return .dark
+        default: return systemColorScheme
+        }
     }
 
     private func increaseFontSize() {
@@ -744,10 +782,13 @@ struct ContentView: View {
                 set: { editorSplitFraction = Double($0) }
             )
         ) {
-            // Source editor
-            TextEditor(text: $document.text)
-                .font(.system(.body, design: .monospaced))
-                .focused($isEditorFocused)
+            // Source editor with syntax highlighting
+            SyntaxHighlightingEditor(
+                text: $document.text,
+                theme: currentTheme,
+                colorScheme: effectiveColorScheme,
+                font: NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+            )
         } right: {
             // Preview (uses debounced text and cached blocks for performance)
             ScrollViewReader { proxy in

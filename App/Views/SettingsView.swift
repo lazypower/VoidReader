@@ -1,14 +1,45 @@
 import SwiftUI
 import AppKit
+import VoidReaderCore
 
 /// Settings window for VoidReader preferences.
 struct SettingsView: View {
+    @AppStorage("selectedThemeID") private var selectedThemeID: String = "system"
+    @AppStorage("appearanceOverride") private var appearanceOverride: String = "system"
     @AppStorage("readerFontFamily") private var readerFontFamily: String = ""
     @AppStorage("readerFontSize") private var readerFontSize: Double = 16.0
     @AppStorage("codeFontFamily") private var codeFontFamily: String = ""
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         Form {
+            // MARK: - Appearance Section
+            Section {
+                // Theme picker
+                Picker("Theme", selection: $selectedThemeID) {
+                    ForEach(ThemeRegistry.shared.themes) { theme in
+                        HStack(spacing: 8) {
+                            ThemePreviewSwatch(theme: theme, colorScheme: effectiveColorScheme)
+                            Text(theme.displayName)
+                        }
+                        .tag(theme.id)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                // Appearance override
+                Picker("Appearance", selection: $appearanceOverride) {
+                    Text("System").tag("system")
+                    Text("Always Light").tag("light")
+                    Text("Always Dark").tag("dark")
+                }
+                .pickerStyle(.segmented)
+            } header: {
+                Text("Appearance")
+            }
+
+            // MARK: - Reader Section
             Section {
                 LabeledContent("Reader Font") {
                     FontPickerButton(
@@ -55,7 +86,32 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(minWidth: 450, idealWidth: 500, minHeight: 320, idealHeight: 360)
+        .frame(minWidth: 450, idealWidth: 500, minHeight: 380, idealHeight: 420)
+    }
+
+    /// Effective color scheme based on override setting
+    private var effectiveColorScheme: ColorScheme {
+        switch appearanceOverride {
+        case "light": return .light
+        case "dark": return .dark
+        default: return colorScheme
+        }
+    }
+}
+
+/// Small color swatch preview for theme picker
+struct ThemePreviewSwatch: View {
+    let theme: AppTheme
+    let colorScheme: ColorScheme
+
+    var body: some View {
+        HStack(spacing: 2) {
+            let palette = theme.palette(for: colorScheme)
+            Circle().fill(palette.mauve).frame(width: 10, height: 10)
+            Circle().fill(palette.blue).frame(width: 10, height: 10)
+            Circle().fill(palette.green).frame(width: 10, height: 10)
+            Circle().fill(palette.teal).frame(width: 10, height: 10)
+        }
     }
 }
 

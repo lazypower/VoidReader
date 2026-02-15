@@ -138,7 +138,7 @@ struct BlockWalker: MarkupWalker {
 
         var marker = AttributedString("│ ")
         marker.font = style.makeFont(size: style.bodySize).italic()
-        marker.foregroundColor = .secondary
+        marker.foregroundColor = style.resolvedSecondaryColor
         textBuffer += marker
 
         let savedItalic = isItalic
@@ -270,7 +270,7 @@ struct BlockWalker: MarkupWalker {
 
         var markerString = AttributedString("\(indent)\(marker) ")
         markerString.font = currentFont()
-        markerString.foregroundColor = .secondary
+        markerString.foregroundColor = style.resolvedSecondaryColor
         textBuffer += markerString
 
         for child in item.children {
@@ -287,7 +287,7 @@ struct BlockWalker: MarkupWalker {
     mutating func visitThematicBreak(_ thematicBreak: ThematicBreak) {
         addBlockSpacing()
         var hrString = AttributedString("───────────────────────────────")
-        hrString.foregroundColor = .secondary
+        hrString.foregroundColor = style.resolvedSecondaryColor
         textBuffer += hrString
     }
 
@@ -296,7 +296,7 @@ struct BlockWalker: MarkupWalker {
     mutating func visitText(_ text: Markdown.Text) {
         var textString = AttributedString(text.string)
         textString.font = currentFont()
-        textString.foregroundColor = .primary
+        textString.foregroundColor = style.resolvedTextColor
         if isStrikethrough {
             textString.strikethroughStyle = .single
         }
@@ -327,8 +327,8 @@ struct BlockWalker: MarkupWalker {
     mutating func visitInlineCode(_ code: InlineCode) {
         var attrs = AttributeContainer()
         attrs.font = style.makeCodeFont(size: style.codeSize)
-        attrs.foregroundColor = .primary
-        attrs.backgroundColor = Color(nsColor: .quaternaryLabelColor).opacity(0.5)
+        attrs.foregroundColor = style.resolvedTextColor
+        attrs.backgroundColor = style.resolvedCodeBackground
 
         var codeString = AttributedString(code.code)
         codeString.mergeAttributes(attrs)
@@ -338,7 +338,7 @@ struct BlockWalker: MarkupWalker {
     mutating func visitLink(_ link: Markdown.Link) {
         var attrs = AttributeContainer()
         attrs.font = currentFont()
-        attrs.foregroundColor = Color.accentColor
+        attrs.foregroundColor = style.resolvedLinkColor
         if let destination = link.destination, let url = URL(string: destination) {
             attrs.link = url
         }
@@ -357,7 +357,7 @@ struct BlockWalker: MarkupWalker {
 
     mutating func visitImage(_ image: Markdown.Image) {
         var attrs = AttributeContainer()
-        attrs.foregroundColor = .secondary
+        attrs.foregroundColor = style.resolvedSecondaryColor
         let altText = image.plainText.isEmpty ? "[Image]" : "🖼 \(image.plainText)"
         var imageString = AttributedString(altText)
         imageString.mergeAttributes(attrs)
@@ -393,11 +393,11 @@ struct BlockWalker: MarkupWalker {
             } else if let code = child as? InlineCode {
                 var str = AttributedString(code.code)
                 str.font = style.makeCodeFont(size: style.codeSize)
-                str.backgroundColor = Color(nsColor: .quaternaryLabelColor).opacity(0.5)
+                str.backgroundColor = style.resolvedCodeBackground
                 result += str
             } else if let link = child as? Markdown.Link {
                 var str = renderInlineContent(link)
-                str.foregroundColor = Color.accentColor
+                str.foregroundColor = style.resolvedLinkColor
                 if let dest = link.destination, let url = URL(string: dest) {
                     str.link = url
                 }

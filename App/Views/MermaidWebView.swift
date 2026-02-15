@@ -18,6 +18,12 @@ struct MermaidWebView: NSViewRepresentable {
     var allowsInteraction: Bool = false  // Enable zoom/pan for expanded view
     var fitToWidth: Bool = false  // Scale diagram to fit container width
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("selectedThemeID") private var selectedThemeID: String = "system"
+
+    /// Current theme from registry
+    private var currentTheme: AppTheme {
+        ThemeRegistry.shared.themeOrDefault(id: selectedThemeID)
+    }
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -44,10 +50,13 @@ struct MermaidWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
-        // Only reload if source changed
-        if context.coordinator.lastSource != source || context.coordinator.lastColorScheme != colorScheme {
+        // Reload if source, colorScheme, or theme changed
+        if context.coordinator.lastSource != source ||
+           context.coordinator.lastColorScheme != colorScheme ||
+           context.coordinator.lastThemeID != selectedThemeID {
             context.coordinator.lastSource = source
             context.coordinator.lastColorScheme = colorScheme
+            context.coordinator.lastThemeID = selectedThemeID
             loadMermaid(in: webView)
         }
     }
@@ -70,13 +79,26 @@ struct MermaidWebView: NSViewRepresentable {
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
 
-        // Determine theme based on color scheme
-        let theme = colorScheme == .dark ? "dark" : "default"
+        // Get theme name and variables
+        let themeName = currentTheme.mermaidThemeName(for: colorScheme)
+        let themeVars = currentTheme.mermaidThemeVariables(for: colorScheme)
+
+        // Convert theme variables to JSON
+        let themeVarsJSON: String
+        if themeVars.isEmpty {
+            themeVarsJSON = "{}"
+        } else if let jsonData = try? JSONSerialization.data(withJSONObject: themeVars),
+                  let jsonString = String(data: jsonData, encoding: .utf8) {
+            themeVarsJSON = jsonString
+        } else {
+            themeVarsJSON = "{}"
+        }
 
         // Replace placeholders
         template = template
             .replacingOccurrences(of: "{{MERMAID_SOURCE}}", with: escapedSource)
-            .replacingOccurrences(of: "{{MERMAID_THEME}}", with: theme)
+            .replacingOccurrences(of: "{{MERMAID_THEME}}", with: themeName)
+            .replacingOccurrences(of: "{{MERMAID_THEME_VARIABLES}}", with: themeVarsJSON)
 
         // Load with base URL pointing to resources for mermaid.min.js
         let resourcesURL = Bundle.main.resourceURL
@@ -86,6 +108,7 @@ struct MermaidWebView: NSViewRepresentable {
     class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var lastSource: String?
         var lastColorScheme: ColorScheme?
+        var lastThemeID: String?
         var heightBinding: Binding<CGFloat>
         var errorBinding: Binding<Bool>
         var fitToWidth: Bool = false
@@ -118,12 +141,8 @@ struct MermaidWebView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            // Apply magnification for expanded/modal view
-            if fitToWidth {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    webView.magnification = 1.5
-                }
-            }
+            // For expanded view, don't auto-magnify - let user zoom interactively
+            // The diagram will render centered at natural size
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

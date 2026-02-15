@@ -10,6 +10,7 @@ struct DistractionFreeView: View {
     @State private var showControls = false
     @State private var hideControlsTask: Task<Void, Never>?
     @State private var wasFullscreen = false
+    @State private var expandedMermaidSource: String?
 
     var body: some View {
         ZStack {
@@ -27,7 +28,10 @@ struct DistractionFreeView: View {
                         .padding(.vertical, 60)
                         .frame(maxWidth: 800)
                 } else {
-                    MarkdownReaderView(text: document.text)
+                    MarkdownReaderView(
+                        text: document.text,
+                        onMermaidExpand: { source in expandedMermaidSource = source }
+                    )
                         .padding(.horizontal, 80)
                         .padding(.vertical, 60)
                         .frame(maxWidth: 800, alignment: .leading)
@@ -100,6 +104,20 @@ struct DistractionFreeView: View {
                 }
             }
         )
+        // Mermaid expand overlay
+        .overlay {
+            if let source = expandedMermaidSource {
+                MermaidExpandedOverlay(
+                    source: source,
+                    isPresented: Binding(
+                        get: { expandedMermaidSource != nil },
+                        set: { if !$0 { expandedMermaidSource = nil } }
+                    )
+                )
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: expandedMermaidSource != nil)
     }
 
     private func showControlsTemporarily() {

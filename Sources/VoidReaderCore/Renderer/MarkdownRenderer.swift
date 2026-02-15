@@ -28,7 +28,33 @@ public struct MarkdownRenderer {
         public var paragraphSpacing: CGFloat = 12
         public var headingSpacing: CGFloat = 20
 
+        // Theme colors (nil = use system semantic colors)
+        public var textColor: Color? = nil          // nil → .primary
+        public var secondaryColor: Color? = nil     // nil → .secondary
+        public var linkColor: Color? = nil          // nil → Color.accentColor
+        public var codeBackground: Color? = nil     // nil → quaternaryLabelColor
+
         public init() {}
+
+        /// Resolved text color (semantic or themed)
+        public var resolvedTextColor: Color {
+            textColor ?? .primary
+        }
+
+        /// Resolved secondary color (semantic or themed)
+        public var resolvedSecondaryColor: Color {
+            secondaryColor ?? .secondary
+        }
+
+        /// Resolved link color (semantic or themed)
+        public var resolvedLinkColor: Color {
+            linkColor ?? Color.accentColor
+        }
+
+        /// Resolved code background (semantic or themed)
+        public var resolvedCodeBackground: Color {
+            codeBackground ?? Color(nsColor: .quaternaryLabelColor).opacity(0.5)
+        }
 
         /// Creates a font with the configured family
         public func makeFont(size: CGFloat, weight: Font.Weight = .regular) -> Font {
@@ -146,8 +172,8 @@ struct AttributedStringWalker: MarkupWalker {
 
         var attrs = AttributeContainer()
         attrs.font = .system(size: style.codeSize, design: .monospaced)
-        attrs.foregroundColor = .primary
-        attrs.backgroundColor = Color(nsColor: .quaternaryLabelColor).opacity(0.5)
+        attrs.foregroundColor = style.resolvedTextColor
+        attrs.backgroundColor = style.resolvedCodeBackground
 
         // Trim trailing newline from code blocks
         let code = codeBlock.code.hasSuffix("\n")
@@ -164,7 +190,7 @@ struct AttributedStringWalker: MarkupWalker {
 
         var attrs = AttributeContainer()
         attrs.font = .system(size: style.bodySize).italic()
-        attrs.foregroundColor = .secondary
+        attrs.foregroundColor = style.resolvedSecondaryColor
 
         // Add quote marker
         var marker = AttributedString("│ ")
@@ -235,7 +261,7 @@ struct AttributedStringWalker: MarkupWalker {
 
         var markerString = AttributedString("\(indent)\(marker) ")
         markerString.font = currentFont()
-        markerString.foregroundColor = .secondary
+        markerString.foregroundColor = style.resolvedSecondaryColor
         result += markerString
 
         for child in item.children {
@@ -254,7 +280,7 @@ struct AttributedStringWalker: MarkupWalker {
         addBlockSpacing()
 
         var hrString = AttributedString("───────────────────────────────")
-        hrString.foregroundColor = .secondary
+        hrString.foregroundColor = style.resolvedSecondaryColor
         result += hrString
     }
 
@@ -263,7 +289,7 @@ struct AttributedStringWalker: MarkupWalker {
     mutating func visitText(_ text: Markdown.Text) -> () {
         var textString = AttributedString(text.string)
         textString.font = currentFont()
-        textString.foregroundColor = isCode ? .primary : .primary
+        textString.foregroundColor = style.resolvedTextColor
         result += textString
     }
 
@@ -300,8 +326,8 @@ struct AttributedStringWalker: MarkupWalker {
     mutating func visitInlineCode(_ code: InlineCode) -> () {
         var attrs = AttributeContainer()
         attrs.font = .system(size: style.codeSize, design: .monospaced)
-        attrs.foregroundColor = .primary
-        attrs.backgroundColor = Color(nsColor: .quaternaryLabelColor).opacity(0.5)
+        attrs.foregroundColor = style.resolvedTextColor
+        attrs.backgroundColor = style.resolvedCodeBackground
 
         var codeString = AttributedString(code.code)
         codeString.mergeAttributes(attrs)
@@ -311,7 +337,7 @@ struct AttributedStringWalker: MarkupWalker {
     mutating func visitLink(_ link: Markdown.Link) -> () {
         var attrs = AttributeContainer()
         attrs.font = currentFont()
-        attrs.foregroundColor = Color.accentColor
+        attrs.foregroundColor = style.resolvedLinkColor
         if let destination = link.destination, let url = URL(string: destination) {
             attrs.link = url
         }
@@ -331,7 +357,7 @@ struct AttributedStringWalker: MarkupWalker {
         // For now, show alt text as placeholder
         // TODO: Async image loading in Section 8
         var attrs = AttributeContainer()
-        attrs.foregroundColor = .secondary
+        attrs.foregroundColor = style.resolvedSecondaryColor
 
         let altText = image.plainText.isEmpty ? "[Image]" : "🖼 \(image.plainText)"
         var imageString = AttributedString(altText)
