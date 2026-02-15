@@ -118,7 +118,12 @@ struct MermaidWebView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            // Diagram rendered - scaling handled via CSS transform for retina
+            // Apply magnification for expanded/modal view
+            if fitToWidth {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    webView.magnification = 1.5
+                }
+            }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

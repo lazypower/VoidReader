@@ -52,6 +52,13 @@ struct ContentView: View {
     // Mermaid expand overlay
     @State private var expandedMermaidSource: String?
 
+    // File watching and conflict detection
+    @State private var fileWatcher: FileWatcher?
+    @State private var lastKnownModDate: Date?
+    @State private var showExternalChangeAlert = false
+    @State private var showSaveConflictAlert = false
+    @State private var pendingSaveAction: (() -> Void)?
+
     init(document: Binding<MarkdownDocument>, fileURL: URL? = nil) {
         self._document = document
         self.fileURL = fileURL
@@ -114,6 +121,30 @@ struct ContentView: View {
         .onAppear {
             updateHeadings(from: document.text)
             updateRenderedBlocks(from: document.text)
+            setupFileWatcher()
+        }
+        .onDisappear {
+            fileWatcher?.stop()
+        }
+        .alert("File Changed", isPresented: $showExternalChangeAlert) {
+            Button("Reload") { reloadFromDisk() }
+            Button("Keep My Version", role: .cancel) {
+                // Update our known mod date to avoid repeated alerts
+                lastKnownModDate = fileURL?.fileModificationDate
+            }
+        } message: {
+            Text("This file has been modified by another application. Would you like to reload it?")
+        }
+        .alert("Save Conflict", isPresented: $showSaveConflictAlert) {
+            Button("Overwrite", role: .destructive) {
+                pendingSaveAction?()
+                pendingSaveAction = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingSaveAction = nil
+            }
+        } message: {
+            Text("This file has been modified by another application since you opened it. Overwrite with your changes?")
         }
         .onReceive(printPublisher) { _ in
             printDocument()
@@ -431,6 +462,61 @@ struct ContentView: View {
                 debouncedText = newText
             }
             .store(in: &cancellables)
+    }
+
+    // MARK: - File Watching
+
+    private func setupFileWatcher() {
+        guard let url = fileURL else { return }
+
+        // Store initial modification date
+        lastKnownModDate = url.fileModificationDate
+
+        // Set up watcher for external changes
+        fileWatcher = FileWatcher(url: url) { [self] in
+            // Check if file actually changed (not just touched)
+            guard let currentModDate = url.fileModificationDate,
+                  let lastKnown = lastKnownModDate,
+                  currentModDate > lastKnown else {
+                return
+            }
+
+            // Show alert on main thread
+            DispatchQueue.main.async {
+                showExternalChangeAlert = true
+            }
+        }
+    }
+
+    private func reloadFromDisk() {
+        guard let url = fileURL,
+              let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .utf8) else {
+            return
+        }
+
+        document.text = text
+        lastKnownModDate = url.fileModificationDate
+
+        // Re-render
+        updateHeadings(from: text)
+        updateRenderedBlocks(from: text)
+    }
+
+    /// Checks for save conflicts before saving. Returns true if safe to save.
+    func checkSaveConflict() -> Bool {
+        guard let url = fileURL,
+              let currentModDate = url.fileModificationDate,
+              let lastKnown = lastKnownModDate else {
+            return true // No conflict detection possible, allow save
+        }
+
+        if currentModDate > lastKnown {
+            // File was modified externally - show conflict dialog
+            return false
+        }
+
+        return true
     }
 
     private var readerView: some View {
