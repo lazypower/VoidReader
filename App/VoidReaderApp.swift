@@ -38,6 +38,10 @@ struct VoidReaderApp: App {
                 }
             }
         }
+
+        Settings {
+            SettingsView()
+        }
     }
 }
 

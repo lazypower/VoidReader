@@ -72,7 +72,7 @@ struct BlockWalker: MarkupWalker {
 
         if isBold { weight = .bold }
 
-        var font = Font.system(size: size, weight: weight)
+        var font = style.makeFont(size: size, weight: weight)
         if isItalic { font = font.italic() }
         return font
     }
@@ -137,7 +137,7 @@ struct BlockWalker: MarkupWalker {
         addBlockSpacing()
 
         var marker = AttributedString("│ ")
-        marker.font = .system(size: style.bodySize).italic()
+        marker.font = style.makeFont(size: style.bodySize).italic()
         marker.foregroundColor = .secondary
         textBuffer += marker
 
@@ -326,7 +326,7 @@ struct BlockWalker: MarkupWalker {
 
     mutating func visitInlineCode(_ code: InlineCode) {
         var attrs = AttributeContainer()
-        attrs.font = .system(size: style.codeSize, design: .monospaced)
+        attrs.font = style.makeCodeFont(size: style.codeSize)
         attrs.foregroundColor = .primary
         attrs.backgroundColor = Color(nsColor: .quaternaryLabelColor).opacity(0.5)
 
@@ -380,19 +380,19 @@ struct BlockWalker: MarkupWalker {
         for child in markup.children {
             if let text = child as? Markdown.Text {
                 var str = AttributedString(text.string)
-                str.font = .system(size: style.bodySize)
+                str.font = style.makeFont(size: style.bodySize)
                 result += str
             } else if let strong = child as? Strong {
                 var str = renderInlineContent(strong)
-                str.font = .system(size: style.bodySize, weight: .bold)
+                str.font = style.makeFont(size: style.bodySize, weight: .bold)
                 result += str
             } else if let emphasis = child as? Emphasis {
                 var str = renderInlineContent(emphasis)
-                str.font = .system(size: style.bodySize).italic()
+                str.font = style.makeFont(size: style.bodySize).italic()
                 result += str
             } else if let code = child as? InlineCode {
                 var str = AttributedString(code.code)
-                str.font = .system(size: style.codeSize, design: .monospaced)
+                str.font = style.makeCodeFont(size: style.codeSize)
                 str.backgroundColor = Color(nsColor: .quaternaryLabelColor).opacity(0.5)
                 result += str
             } else if let link = child as? Markdown.Link {

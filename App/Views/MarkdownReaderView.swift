@@ -6,6 +6,7 @@ struct MarkdownReaderView: View {
     let text: String
     var blocks: [MarkdownBlock] = []
     var codeFontSize: CGFloat = 13
+    var codeFontFamily: String? = nil
     var onTaskToggle: ((Int, Bool) -> Void)?
     var onMermaidExpand: ((String) -> Void)?
 
@@ -35,7 +36,7 @@ struct MarkdownReaderView: View {
             TaskListView(items: items, onToggle: onTaskToggle)
 
         case .codeBlock(let codeData):
-            CodeBlockView(data: codeData, fontSize: codeFontSize)
+            CodeBlockView(data: codeData, fontSize: codeFontSize, fontFamily: codeFontFamily)
 
         case .image(let imageData):
             ImageBlockView(data: imageData)
@@ -64,6 +65,7 @@ struct MarkdownReaderViewWithAnchors: View {
     var useRegex: Bool = false
     var currentMatchIndex: Int = 0
     var codeFontSize: CGFloat = 13
+    var codeFontFamily: String? = nil
     var onTaskToggle: ((Int, Bool) -> Void)?
     var onTopBlockChange: ((Int) -> Void)?
     var onMermaidExpand: ((String) -> Void)?
@@ -85,6 +87,7 @@ struct MarkdownReaderViewWithAnchors: View {
                     searchText: searchText,
                     matchRanges: matchInfo.blockMatches[index] ?? [],
                     codeFontSize: codeFontSize,
+                    codeFontFamily: codeFontFamily,
                     onTaskToggle: onTaskToggle,
                     onMermaidExpand: onMermaidExpand
                 )
@@ -194,6 +197,7 @@ private struct BlockView: View {
     var searchText: String = ""
     var matchRanges: [Range<String.Index>] = []
     var codeFontSize: CGFloat = 13
+    var codeFontFamily: String? = nil
     var onTaskToggle: ((Int, Bool) -> Void)?
     var onMermaidExpand: ((String) -> Void)?
 
@@ -215,7 +219,7 @@ private struct BlockView: View {
             TaskListView(items: items, onToggle: onTaskToggle)
 
         case .codeBlock(let codeData):
-            CodeBlockView(data: codeData, fontSize: codeFontSize)
+            CodeBlockView(data: codeData, fontSize: codeFontSize, fontFamily: codeFontFamily)
 
         case .image(let imageData):
             ImageBlockView(data: imageData)

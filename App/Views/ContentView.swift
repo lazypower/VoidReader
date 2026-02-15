@@ -12,6 +12,8 @@ struct ContentView: View {
     @AppStorage("showOutlineSidebar") private var showOutlineSidebar = false
     @SceneStorage("editorSplitFraction") private var editorSplitFraction: Double = 0.5
     @AppStorage("readerFontSize") private var readerFontSize: Double = 16.0
+    @AppStorage("readerFontFamily") private var readerFontFamily: String = ""
+    @AppStorage("codeFontFamily") private var codeFontFamily: String = ""
     @State private var showCheatSheet = false
     @State private var isDistractionFree = false
     @State private var documentStats: DocumentStats
@@ -170,33 +172,14 @@ struct ContentView: View {
         .onChange(of: useRegex) { _, _ in
             updateSearch()
         }
-        .background(
-            ShareSheetPresenter(isPresented: $showingShare, items: [document.text])
-        )
-        .background(
-            // Keyboard shortcuts for Find/Replace
-            Group {
-                Button("") { showFind() }
-                    .keyboardShortcut("f", modifiers: .command)
-                Button("") { showFindAndReplace() }
-                    .keyboardShortcut("h", modifiers: .command)
-            }
-            .hidden()
-        )
-        .background(
-            // Keyboard shortcuts for font size
-            Group {
-                Button("") { increaseFontSize() }
-                    .keyboardShortcut("+", modifiers: .command)
-                Button("") { increaseFontSize() }
-                    .keyboardShortcut("=", modifiers: .command)
-                Button("") { decreaseFontSize() }
-                    .keyboardShortcut("-", modifiers: .command)
-                Button("") { resetFontSize() }
-                    .keyboardShortcut("0", modifiers: .command)
-            }
-            .hidden()
-        )
+        .onChange(of: readerFontFamily) { _, _ in
+            updateRenderedBlocks(from: document.text)
+        }
+        .onChange(of: codeFontFamily) { _, _ in
+            updateRenderedBlocks(from: document.text)
+        }
+        .background(ShareSheetPresenter(isPresented: $showingShare, items: [document.text]))
+        .background(keyboardShortcuts)
         .onExitCommand {
             if showFindBar {
                 dismissFindBar()
@@ -229,7 +212,21 @@ struct ContentView: View {
         var style = MarkdownRenderer.Style()
         style.bodySize = CGFloat(readerFontSize)
         style.codeSize = CGFloat(readerFontSize * 0.875) // Code slightly smaller
+
+        // Set font families (empty string = system font)
+        if !readerFontFamily.isEmpty {
+            style.fontFamily = readerFontFamily
+        }
+        if !codeFontFamily.isEmpty {
+            style.codeFontFamily = codeFontFamily
+        }
+
         return style
+    }
+
+    /// Resolved code font family name (nil = system mono)
+    private var resolvedCodeFontFamily: String? {
+        codeFontFamily.isEmpty ? nil : codeFontFamily
     }
 
     private func increaseFontSize() {
@@ -245,6 +242,31 @@ struct ContentView: View {
     private func resetFontSize() {
         readerFontSize = Self.defaultFontSize
         updateRenderedBlocks(from: document.text)
+    }
+
+    @ViewBuilder
+    private var keyboardShortcuts: some View {
+        // Find/Replace shortcuts
+        Group {
+            Button("") { showFind() }
+                .keyboardShortcut("f", modifiers: .command)
+            Button("") { showFindAndReplace() }
+                .keyboardShortcut("h", modifiers: .command)
+        }
+        .hidden()
+
+        // Font size shortcuts
+        Group {
+            Button("") { increaseFontSize() }
+                .keyboardShortcut("+", modifiers: .command)
+            Button("") { increaseFontSize() }
+                .keyboardShortcut("=", modifiers: .command)
+            Button("") { decreaseFontSize() }
+                .keyboardShortcut("-", modifiers: .command)
+            Button("") { resetFontSize() }
+                .keyboardShortcut("0", modifiers: .command)
+        }
+        .hidden()
     }
 
     private var normalView: some View {
@@ -635,6 +657,7 @@ struct ContentView: View {
                         useRegex: useRegex,
                         currentMatchIndex: currentMatchIndex,
                         codeFontSize: CGFloat(readerFontSize * 0.875),
+                        codeFontFamily: resolvedCodeFontFamily,
                         onTaskToggle: handleTaskToggle,
                         onTopBlockChange: updateCurrentHeading,
                         onMermaidExpand: { source in expandedMermaidSource = source }
@@ -734,6 +757,7 @@ struct ContentView: View {
                         headings: headings,
                         blocks: renderedBlocks,
                         codeFontSize: CGFloat(readerFontSize * 0.875),
+                        codeFontFamily: resolvedCodeFontFamily,
                         onTaskToggle: handleTaskToggle,
                         onMermaidExpand: { source in expandedMermaidSource = source }
                     )

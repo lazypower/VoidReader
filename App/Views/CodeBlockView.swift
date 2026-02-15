@@ -12,6 +12,7 @@ private let highlightr: Highlightr? = {
 struct CodeBlockView: View {
     let data: CodeBlockData
     var fontSize: CGFloat = 13
+    var fontFamily: String? = nil  // nil = system mono
     @State private var showCopied = false
     @Environment(\.colorScheme) private var colorScheme
 
@@ -23,6 +24,14 @@ struct CodeBlockView: View {
     // Badge font scales with code font
     private var badgeFontSize: CGFloat {
         max(9, fontSize * 0.85)
+    }
+
+    // Resolve font family to NSFont
+    private var nsFont: NSFont {
+        if let family = fontFamily, let font = NSFont(name: family, size: fontSize) {
+            return font
+        }
+        return NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
     }
 
     var body: some View {
@@ -78,7 +87,7 @@ struct CodeBlockView: View {
         } else {
             // Fallback to plain text
             Text(data.code)
-                .font(.system(size: fontSize, design: .monospaced))
+                .font(fontFamily != nil ? .custom(fontFamily!, size: fontSize) : .system(size: fontSize, design: .monospaced))
         }
     }
 
@@ -95,14 +104,13 @@ struct CodeBlockView: View {
             return nil
         }
 
-        // Convert to mutable to adjust font size
+        // Convert to mutable to adjust font
         let mutableAttr = NSMutableAttributedString(attributedString: nsAttr)
         let fullRange = NSRange(location: 0, length: mutableAttr.length)
 
-        // Update font to use our size while preserving monospace
+        // Update font to use our font family and size
         mutableAttr.enumerateAttribute(.font, in: fullRange, options: []) { value, range, _ in
-            let newFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-            mutableAttr.addAttribute(.font, value: newFont, range: range)
+            mutableAttr.addAttribute(.font, value: nsFont, range: range)
         }
 
         // Convert NSAttributedString to SwiftUI AttributedString

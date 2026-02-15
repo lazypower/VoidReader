@@ -10,6 +10,7 @@ public struct MarkdownRenderer {
         // Base typography
         public var bodySize: CGFloat = 16
         public var bodyWeight: Font.Weight = .regular
+        public var fontFamily: String? = nil  // nil = system font
 
         // Heading scale (relative to body size)
         public var h1Scale: CGFloat = 2.0
@@ -21,12 +22,29 @@ public struct MarkdownRenderer {
 
         // Code styling
         public var codeSize: CGFloat = 14
+        public var codeFontFamily: String? = nil  // nil = system mono
 
         // Paragraph spacing
         public var paragraphSpacing: CGFloat = 12
         public var headingSpacing: CGFloat = 20
 
         public init() {}
+
+        /// Creates a font with the configured family
+        public func makeFont(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+            if let family = fontFamily {
+                return .custom(family, size: size)
+            }
+            return .system(size: size, weight: weight)
+        }
+
+        /// Creates a code font with the configured family
+        public func makeCodeFont(size: CGFloat) -> Font {
+            if let family = codeFontFamily {
+                return .custom(family, size: size)
+            }
+            return .system(size: size, design: .monospaced)
+        }
     }
 
     /// Renders markdown text to an AttributedString.
