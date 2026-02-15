@@ -6,6 +6,7 @@ struct MarkdownReaderView: View {
     let text: String
     var blocks: [MarkdownBlock] = []
     var onTaskToggle: ((Int, Bool) -> Void)?
+    var onMermaidExpand: ((String) -> Void)?
 
     var body: some View {
         // Use provided blocks or render if empty (fallback for previews)
@@ -39,7 +40,7 @@ struct MarkdownReaderView: View {
             ImageBlockView(data: imageData)
 
         case .mermaid(let mermaidData):
-            MermaidBlockView(data: mermaidData)
+            MermaidBlockView(data: mermaidData, onExpand: onMermaidExpand)
         }
     }
 }
@@ -61,6 +62,7 @@ struct MarkdownReaderViewWithAnchors: View {
     var currentMatchIndex: Int = 0
     var onTaskToggle: ((Int, Bool) -> Void)?
     var onTopBlockChange: ((Int) -> Void)?
+    var onMermaidExpand: ((String) -> Void)?
 
     var body: some View {
         // Use provided blocks or render if empty (fallback)
@@ -78,7 +80,8 @@ struct MarkdownReaderViewWithAnchors: View {
                     block: block,
                     searchText: searchText,
                     matchRanges: matchInfo.blockMatches[index] ?? [],
-                    onTaskToggle: onTaskToggle
+                    onTaskToggle: onTaskToggle,
+                    onMermaidExpand: onMermaidExpand
                 )
                 .id("block-\(index)")
                 .background(
@@ -170,6 +173,7 @@ private struct BlockView: View {
     var searchText: String = ""
     var matchRanges: [Range<String.Index>] = []
     var onTaskToggle: ((Int, Bool) -> Void)?
+    var onMermaidExpand: ((String) -> Void)?
 
     var body: some View {
         switch block {
@@ -195,7 +199,7 @@ private struct BlockView: View {
             ImageBlockView(data: imageData)
 
         case .mermaid(let mermaidData):
-            MermaidBlockView(data: mermaidData)
+            MermaidBlockView(data: mermaidData, onExpand: onMermaidExpand)
         }
     }
 

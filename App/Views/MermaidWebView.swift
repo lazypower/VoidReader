@@ -122,8 +122,8 @@ struct MermaidWebView: NSViewRepresentable {
 /// A block view for mermaid diagrams with loading state and error handling.
 struct MermaidBlockView: View {
     let data: MermaidData
+    var onExpand: ((String) -> Void)? = nil
     @State private var height: CGFloat = 100 // Start smaller, will expand
-    @State private var showExpanded = false
     @State private var hasError = false
 
     var body: some View {
@@ -138,7 +138,7 @@ struct MermaidBlockView: View {
                 Spacer()
                 if !hasError {
                     Button {
-                        showExpanded = true
+                        onExpand?(data.source)
                     } label: {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
                             .font(.system(size: 11))
@@ -163,11 +163,6 @@ struct MermaidBlockView: View {
             }
         }
         .padding(.vertical, 4)
-        .overlay {
-            if showExpanded {
-                MermaidExpandedOverlay(source: data.source, isPresented: $showExpanded)
-            }
-        }
     }
 }
 

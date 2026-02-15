@@ -49,6 +49,9 @@ struct ContentView: View {
     // Cached rendered blocks (expensive to compute)
     @State private var renderedBlocks: [MarkdownBlock] = []
 
+    // Mermaid expand overlay
+    @State private var expandedMermaidSource: String?
+
     init(document: Binding<MarkdownDocument>, fileURL: URL? = nil) {
         self._document = document
         self.fileURL = fileURL
@@ -81,6 +84,19 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.15), value: showCheatSheet)
+        .overlay {
+            if let source = expandedMermaidSource {
+                MermaidExpandedOverlay(
+                    source: source,
+                    isPresented: Binding(
+                        get: { expandedMermaidSource != nil },
+                        set: { if !$0 { expandedMermaidSource = nil } }
+                    )
+                )
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: expandedMermaidSource != nil)
         .cheatSheetOnHold(isShowing: $showCheatSheet)
         .onAppear {
             setupDebouncing()
@@ -431,7 +447,8 @@ struct ContentView: View {
                         searchText: searchText,
                         currentMatchIndex: currentMatchIndex,
                         onTaskToggle: handleTaskToggle,
-                        onTopBlockChange: updateCurrentHeading
+                        onTopBlockChange: updateCurrentHeading,
+                        onMermaidExpand: { source in expandedMermaidSource = source }
                     )
                     .padding(40)
                     .frame(maxWidth: 720, alignment: .leading)
@@ -523,7 +540,8 @@ struct ContentView: View {
                         text: debouncedText,
                         headings: headings,
                         blocks: renderedBlocks,
-                        onTaskToggle: handleTaskToggle
+                        onTaskToggle: handleTaskToggle,
+                        onMermaidExpand: { source in expandedMermaidSource = source }
                     )
                     .padding(40)
                     .frame(maxWidth: 720, alignment: .leading)
