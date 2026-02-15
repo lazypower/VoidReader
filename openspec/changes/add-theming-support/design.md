@@ -1,19 +1,100 @@
 # Design: Theming Support
 
 ## Context
-VoidReader needs a cohesive theming system that works across native SwiftUI views, AttributedString rendering, and WKWebView (mermaid). The user prioritizes accessibility and has expressed preference for Catppuccin Mocha.
+VoidReader needs a cohesive theming system that works across native SwiftUI views, AttributedString rendering, and WKWebView (mermaid). The user prioritizes accessibility and has expressed preference for Catppuccin Mocha. The system should support multiple themes with a picker UI, starting with Catppuccin and designed for future expansion.
 
 ## Goals
 - Seamless light/dark mode switching following system preferences
-- Reader view uses native macOS semantic colors (feels native)
-- Editor syntax highlighting uses Catppuccin Latte (light) ↔ Mocha (dark)
-- Native syntax highlighting without JavaScript dependencies
-- Mermaid diagrams adapt to system appearance
+- Theme picker in Settings with support for multiple themes
+- Theme architecture that supports adding new themes easily
+- **All surfaces adopt selected theme coherently:** reader, editor, mermaid, code blocks
+- System theme = native macOS semantic colors (blends in)
+- Custom themes (Catppuccin, etc.) = full palette applied everywhere
 
 ## Non-Goals
 - Custom theme editor / user-defined themes (v1)
-- Additional theme palettes beyond Catppuccin (v1)
+- Appearance override (follow system only)
+- UI chrome theming (rely on macOS semantic colors)
 - Per-document theme settings
+
+## Architecture
+
+### Key Principle: Default = Native macOS
+The app blends into macOS by default. The "System" theme uses NSColor semantic colors, meaning it automatically adapts to system appearance without asserting a custom style. Themed alternatives (Catppuccin, user themes) are opt-in choices.
+
+### Theme System Location
+Theme definitions live in `VoidReaderCore/Theming/` (Swift Package) so they're available to both the app and QuickLook extension.
+
+```
+Sources/VoidReaderCore/Theming/
+├── ThemePalette.swift       # Color palette struct
+├── AppTheme.swift           # Theme with light/dark variants (BOTH required)
+├── ThemeRegistry.swift      # Available themes registry
+├── SystemTheme.swift        # Native macOS semantic colors
+└── CatppuccinTheme.swift    # Catppuccin palette definitions
+```
+
+### Core Types
+
+```swift
+/// Color palette for a theme variant (light or dark)
+public struct ThemePalette {
+    public let base, text, subtext0: Color
+    public let surface0, surface1: Color
+    public let mauve, blue, green, teal, lavender, red, yellow: Color
+
+    /// System theme uses NSColor semantic colors
+    public static func system(for colorScheme: ColorScheme) -> ThemePalette
+}
+
+/// A complete theme - MUST define BOTH light AND dark variants
+public struct AppTheme: Identifiable {
+    public let id: String           // e.g., "system", "catppuccin"
+    public let displayName: String  // e.g., "System", "Catppuccin"
+    public let lightPalette: ThemePalette  // Required
+    public let darkPalette: ThemePalette   // Required
+
+    func palette(for colorScheme: ColorScheme) -> ThemePalette
+    func mermaidThemeVariables(for colorScheme: ColorScheme) -> [String: String]
+}
+
+/// Registry of available themes
+public final class ThemeRegistry {
+    public static let shared = ThemeRegistry()
+    public let themes: [AppTheme] = [.system, .catppuccin]  // System is first/default
+    public func theme(id: String) -> AppTheme?
+}
+```
+
+### Shipped Themes
+
+**System (default)**
+- Light: NSColor.textColor, NSColor.linkColor, NSColor.separatorColor, etc.
+- Dark: Same NSColor values (automatically adapted by macOS)
+- Mermaid: Uses built-in "default" / "dark" themes
+
+**Catppuccin (alternative)**
+- Light: Latte palette
+- Dark: Mocha palette
+- Mermaid: Custom themeVariables from palette
+
+### Adding Future Themes
+To add a new theme:
+1. Create palette constants (e.g., `DraculaTheme.swift`)
+2. Define BOTH lightPalette AND darkPalette
+3. Add `AppTheme.dracula` static property
+4. Add to `ThemeRegistry.themes` array
+
+Future: User themes discovered from `~/Library/Application Support/VoidReader/Themes/`
+
+### Editor Syntax Highlighting
+SwiftUI's `TextEditor` only binds to `String`, not `AttributedString`. For syntax highlighting:
+
+1. Create `SyntaxHighlightingEditor` as `NSViewRepresentable` wrapping `NSTextView`
+2. Use `NSTextStorage` subclass with regex-based pattern matching
+3. For System theme: use NSColor semantic colors for syntax tokens
+4. For Catppuccin: use palette accent colors (mauve, blue, green, etc.)
+5. Debounce highlighting for performance
 
 ## Decisions
 
@@ -100,31 +181,56 @@ enum MarkdownSyntax {
 ```
 
 ### Decision: Mermaid Theme Injection
-Pass theme via mermaid.initialize() config, using Catppuccin-compatible values.
+Pass theme via mermaid.initialize() config, using selected theme's palette values.
 
 ```javascript
 mermaid.initialize({
     theme: 'base',
     themeVariables: {
-        primaryColor: theme.surface,
-        primaryTextColor: theme.text,
-        primaryBorderColor: theme.accent,
-        lineColor: theme.textMuted,
+        primaryColor: palette.surface0,
+        primaryTextColor: palette.text,
+        primaryBorderColor: palette.surface1,
+        lineColor: palette.subtext0,
+        secondaryColor: palette.surface1,
+        background: palette.base,
         // ... etc
     }
 });
 ```
 
-**Re-rendering on theme change:** Listen for appearance change notification and call mermaid.render() again with updated config.
+Update `mermaid-template.html` to use `{{MERMAID_THEME_VARIABLES}}` placeholder.
+Update `MermaidWebView.swift` to generate JSON from `theme.mermaidThemeVariables(for: colorScheme)`.
+
+**Re-rendering on theme change:** Already handled - `updateNSView` detects `colorScheme` changes and reloads.
+
+### Decision: Theme Picker UI
+Add "Appearance" section to SettingsView:
+
+```swift
+Section("Appearance") {
+    Picker("Theme", selection: $selectedThemeID) {
+        ForEach(ThemeRegistry.shared.themes) { theme in
+            HStack {
+                ThemePreviewSwatch(theme: theme)
+                Text(theme.displayName)
+            }
+            .tag(theme.id)
+        }
+    }
+}
+```
+
+Store selection via `@AppStorage("selectedThemeID")`.
 
 ## Risks / Trade-offs
 
 | Risk | Mitigation |
 |------|------------|
-| Catppuccin colors may not suit all users | System override allows forcing light/dark |
+| User may not like Catppuccin | Theme picker allows adding alternatives |
 | Syntax highlighting regex may miss edge cases | Start with common patterns, iterate |
 | Mermaid theme may not perfectly match | Use 'base' theme with explicit variables |
+| NSTextView complexity | Well-documented pattern in macOS development |
 
-## Open Questions
-- Should we expose a "high contrast" variant for accessibility?
-- Should syntax highlighting be configurable (on/off) in preferences?
+## Resolved Questions
+- ~~Should we expose a "high contrast" variant?~~ Not for v1, use theme picker instead
+- ~~Should syntax highlighting be configurable?~~ Not for v1, always on in edit mode

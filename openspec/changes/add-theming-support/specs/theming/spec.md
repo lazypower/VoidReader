@@ -1,8 +1,49 @@
 # Theming
 
-This capability defines VoidReader's theming system including light/dark mode support, color tokens, and syntax highlighting.
+This capability defines VoidReader's theming system including light/dark mode support, color tokens, syntax highlighting, and theme selection.
 
 ## ADDED Requirements
+
+### Requirement: Theme Selection
+The application SHALL provide a theme picker in Settings allowing users to choose from available themes.
+
+#### Scenario: Theme picker UI
+- **WHEN** user opens Settings
+- **THEN** an "Appearance" section shows available themes
+- **AND** each theme displays a preview swatch of its accent colors
+
+#### Scenario: Theme selection persistence
+- **WHEN** user selects a different theme
+- **THEN** the selection is applied immediately
+- **AND** the selection persists across app restarts
+
+#### Scenario: Default theme
+- **WHEN** the app is first launched
+- **THEN** "System" theme is selected by default
+- **AND** the app uses native macOS semantic colors
+
+#### Scenario: Shipped themes
+- **WHEN** user views the theme picker
+- **THEN** "System" and "Catppuccin" are available
+- **AND** additional user-created themes appear if discovered
+
+### Requirement: Theme Structure
+Every theme SHALL define both light and dark variants. Single-mode themes are not permitted.
+
+#### Scenario: Theme variant requirement
+- **WHEN** a theme is loaded
+- **THEN** it MUST provide both a light palette and a dark palette
+- **AND** themes missing either variant are invalid
+
+#### Scenario: System theme variants
+- **WHEN** "System" theme is active
+- **THEN** light variant uses NSColor semantic colors (textColor, linkColor, etc.)
+- **AND** dark variant uses NSColor semantic colors (automatically adapted)
+
+#### Scenario: Catppuccin theme variants
+- **WHEN** "Catppuccin" theme is active
+- **THEN** light variant uses Latte palette
+- **AND** dark variant uses Mocha palette
 
 ### Requirement: System Appearance Detection
 The application SHALL automatically detect and follow macOS system appearance (light/dark mode).
@@ -164,17 +205,20 @@ The application SHALL allow users to configure fonts for reader and editor views
 - **THEN** font size increases or decreases
 - **AND** Cmd+0 resets to default size
 
-### Requirement: Appearance Override
-The application SHALL provide an in-app setting to override system appearance.
+### Requirement: Appearance Override (User Choice)
+The application SHALL provide an optional in-app setting to override system appearance. This is an explicit user choice to deviate from system defaults.
 
-#### Scenario: Override to dark
-- **WHEN** user sets appearance preference to "Dark"
-- **THEN** dark theme applies regardless of system setting
+#### Scenario: Default follows system
+- **WHEN** appearance override is set to "System" (default)
+- **THEN** app follows macOS system appearance
+- **AND** theme's light/dark variant switches automatically
 
-#### Scenario: Override to light
-- **WHEN** user sets appearance preference to "Light"
-- **THEN** light theme applies regardless of system setting
+#### Scenario: Override to always dark
+- **WHEN** user explicitly sets appearance to "Always Dark"
+- **THEN** app uses theme's dark variant regardless of system setting
+- **AND** user accepts responsibility for potential visual clash
 
-#### Scenario: Follow system
-- **WHEN** user sets appearance preference to "System" (default)
-- **THEN** theme follows system appearance
+#### Scenario: Override to always light
+- **WHEN** user explicitly sets appearance to "Always Light"
+- **THEN** app uses theme's light variant regardless of system setting
+- **AND** user accepts responsibility for potential visual clash
