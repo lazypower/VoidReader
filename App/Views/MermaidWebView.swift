@@ -118,7 +118,12 @@ struct MermaidWebView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            // Diagram rendered - magnification can be adjusted by user via pinch
+            // Set initial zoom for expanded view after a brief delay for layout
+            if fitToWidth {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    webView.magnification = 2.0  // Start at 2x, user can adjust
+                }
+            }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
