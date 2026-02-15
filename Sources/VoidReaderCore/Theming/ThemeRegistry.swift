@@ -1,18 +1,26 @@
 import SwiftUI
 
 /// Registry of available themes.
-/// Provides access to built-in themes and (future) user-created themes.
+/// Combines built-in themes with user-created themes from the themes directory.
 public final class ThemeRegistry: @unchecked Sendable {
     public static let shared = ThemeRegistry()
 
-    /// All available themes. System theme is always first (default).
-    public let themes: [AppTheme] = [
+    /// Built-in themes that ship with the app
+    public let builtInThemes: [AppTheme] = [
         .system,
         .catppuccin
     ]
 
-    /// The default theme
-    public var defaultTheme: AppTheme { themes[0] }
+    /// User themes loaded from ~/Library/Application Support/VoidReader/themes/
+    public private(set) var userThemes: [AppTheme] = []
+
+    /// All available themes. Built-in themes first, then user themes.
+    public var themes: [AppTheme] {
+        builtInThemes + userThemes
+    }
+
+    /// The default theme (always System)
+    public var defaultTheme: AppTheme { .system }
 
     /// Find theme by ID
     public func theme(id: String) -> AppTheme? {
@@ -24,7 +32,21 @@ public final class ThemeRegistry: @unchecked Sendable {
         theme(id: id) ?? defaultTheme
     }
 
-    private init() {}
+    /// Reload user themes from disk
+    public func reloadUserThemes() {
+        userThemes = ThemeLoader.loadUserThemes()
+    }
+
+    /// Opens the themes directory in Finder and creates example if needed
+    public func openThemesDirectory() {
+        ThemeLoader.writeExampleTheme()
+        ThemeLoader.openThemesDirectory()
+    }
+
+    private init() {
+        // Load user themes synchronously - should be fast for typical use
+        reloadUserThemes()
+    }
 }
 
 // MARK: - Current Theme Access

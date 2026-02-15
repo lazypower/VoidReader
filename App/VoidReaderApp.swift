@@ -14,6 +14,17 @@ struct VoidReaderApp: App {
             CommandGroup(after: .toolbar) {
                 Toggle("Show Status Bar", isOn: $showStatusBar)
                     .keyboardShortcut("/", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button("Open Themes Folder...") {
+                    ThemeRegistry.shared.openThemesDirectory()
+                }
+
+                Button("Reload Themes") {
+                    ThemeRegistry.shared.reloadUserThemes()
+                }
+                .keyboardShortcut("t", modifiers: [.command, .shift, .option])
             }
 
             // File menu - Print (replace default)
