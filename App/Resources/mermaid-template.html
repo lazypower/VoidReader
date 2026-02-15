@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=10.0">
     <style>
         * {
             margin: 0;
@@ -68,15 +68,23 @@
                 const element = document.getElementById('diagram');
                 const source = element.textContent.trim();
 
-                const { svg } = await mermaid.render('rendered-diagram', source);
-                element.innerHTML = svg;
+                const { svg: svgContent } = await mermaid.render('rendered-diagram', source);
+                element.innerHTML = svgContent;
                 element.classList.remove('mermaid');
 
-                // Report size back to Swift
+                // Scale SVG for retina displays
+                const dpr = window.devicePixelRatio || 1;
+                const svgElement = element.querySelector('svg');
+                if (svgElement && dpr > 1) {
+                    svgElement.style.transform = `scale(${dpr})`;
+                    svgElement.style.transformOrigin = 'top left';
+                }
+
+                // Report size back to Swift (account for scale)
                 const rect = element.getBoundingClientRect();
                 window.webkit.messageHandlers.sizeReporter.postMessage({
-                    width: Math.ceil(rect.width),
-                    height: Math.ceil(rect.height),
+                    width: Math.ceil(rect.width * dpr),
+                    height: Math.ceil(rect.height * dpr),
                     success: true
                 });
             } catch (error) {
