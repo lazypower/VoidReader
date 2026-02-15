@@ -163,48 +163,82 @@ struct MermaidBlockView: View {
             }
         }
         .padding(.vertical, 4)
-        .sheet(isPresented: $showExpanded) {
-            MermaidExpandedView(source: data.source)
+        .overlay {
+            if showExpanded {
+                MermaidExpandedOverlay(source: data.source, isPresented: $showExpanded)
+            }
         }
     }
 }
 
-/// Expanded overlay view for viewing complex diagrams.
-struct MermaidExpandedView: View {
+/// Full-window overlay for viewing complex diagrams.
+struct MermaidExpandedOverlay: View {
     let source: String
-    @Environment(\.dismiss) private var dismiss
+    @Binding var isPresented: Bool
     @State private var renderedHeight: CGFloat = 400
     @State private var hasError = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Header bar
-            HStack {
-                Text("Mermaid Diagram")
-                    .font(.headline)
-                Spacer()
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
-                        .foregroundColor(.secondary)
+        GeometryReader { geo in
+            ZStack {
+                // Dimmed background
+                Color.black.opacity(0.7)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            isPresented = false
+                        }
+                    }
+
+                // Diagram container - takes most of available space
+                VStack(spacing: 0) {
+                    // Header bar
+                    HStack {
+                        Image(systemName: "chart.bar.doc.horizontal")
+                            .foregroundColor(.secondary)
+                        Text("Mermaid Diagram")
+                            .font(.headline)
+
+                        Spacer()
+
+                        Text("Pinch to zoom • Scroll to pan")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Spacer()
+
+                        Button {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                isPresented = false
+                            }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title2)
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding()
+                    .background(Color(nsColor: .windowBackgroundColor))
+
+                    Divider()
+
+                    // Interactive diagram - fills available space
+                    MermaidWebView(source: source, renderedHeight: $renderedHeight, hasError: $hasError, allowsInteraction: true)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(nsColor: .textBackgroundColor))
                 }
-                .buttonStyle(.plain)
-                .keyboardShortcut(.escape, modifiers: [])
+                .frame(width: geo.size.width * 0.9, height: geo.size.height * 0.9)
+                .cornerRadius(12)
+                .shadow(radius: 20)
             }
-            .padding()
-            .background(Color(nsColor: .windowBackgroundColor))
-
-            Divider()
-
-            // Interactive diagram area with zoom/pan
-            MermaidWebView(source: source, renderedHeight: $renderedHeight, hasError: $hasError, allowsInteraction: true)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(nsColor: .textBackgroundColor))
         }
-        .frame(minWidth: 700, minHeight: 500)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .transition(.opacity)
+        .onExitCommand {
+            withAnimation(.easeOut(duration: 0.2)) {
+                isPresented = false
+            }
+        }
     }
 }
 

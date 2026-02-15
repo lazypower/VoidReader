@@ -15,12 +15,14 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-markdown.git", from: "0.4.0"),
+        .package(url: "https://github.com/raspu/Highlightr.git", from: "2.1.0"),
     ],
     targets: [
         .target(
             name: "VoidReaderCore",
             dependencies: [
                 .product(name: "Markdown", package: "swift-markdown"),
+                .product(name: "Highlightr", package: "Highlightr"),
             ],
             path: "Sources/VoidReaderCore"
         ),

@@ -1,10 +1,23 @@
 import SwiftUI
 import VoidReaderCore
+import Highlightr
 
-/// Renders a code block with copy button.
+/// Shared highlighter instance for performance.
+private let highlightr: Highlightr? = {
+    let h = Highlightr()
+    return h
+}()
+
+/// Renders a code block with syntax highlighting and copy button.
 struct CodeBlockView: View {
     let data: CodeBlockData
     @State private var showCopied = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    // Theme config - single point to change later
+    private var themeName: String {
+        colorScheme == .dark ? "atom-one-dark" : "atom-one-light"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -41,16 +54,43 @@ struct CodeBlockView: View {
             .padding(.horizontal, 12)
             .padding(.top, 8)
 
-            // Code content
+            // Code content with syntax highlighting
             ScrollView(.horizontal, showsIndicators: false) {
-                Text(data.code)
-                    .font(.system(size: 13, design: .monospaced))
+                highlightedCode
                     .textSelection(.enabled)
                     .padding(12)
             }
         }
         .background(Color(nsColor: .quaternaryLabelColor).opacity(0.3))
         .cornerRadius(8)
+    }
+
+    @ViewBuilder
+    private var highlightedCode: some View {
+        if let highlighted = highlightCode() {
+            Text(highlighted)
+        } else {
+            // Fallback to plain text
+            Text(data.code)
+                .font(.system(size: 13, design: .monospaced))
+        }
+    }
+
+    private func highlightCode() -> AttributedString? {
+        guard let highlightr = highlightr else { return nil }
+
+        // Set theme based on color scheme
+        highlightr.setTheme(to: themeName)
+
+        // Use language hint or let Highlightr auto-detect
+        let language = data.language?.lowercased()
+
+        guard let nsAttr = highlightr.highlight(data.code, as: language) else {
+            return nil
+        }
+
+        // Convert NSAttributedString to SwiftUI AttributedString
+        return try? AttributedString(nsAttr, including: AttributeScopes.AppKitAttributes.self)
     }
 
     private func copyCode() {
@@ -69,7 +109,7 @@ struct CodeBlockView: View {
     }
 }
 
-#Preview {
+#Preview("Swift") {
     CodeBlockView(data: CodeBlockData(
         code: """
         func greet(name: String) -> String {
@@ -80,6 +120,32 @@ struct CodeBlockView: View {
         print(message)
         """,
         language: "swift"
+    ))
+    .padding()
+    .frame(width: 500)
+}
+
+#Preview("Python") {
+    CodeBlockView(data: CodeBlockData(
+        code: """
+        def fibonacci(n):
+            if n <= 1:
+                return n
+            return fibonacci(n-1) + fibonacci(n-2)
+
+        for i in range(10):
+            print(fibonacci(i))
+        """,
+        language: "python"
+    ))
+    .padding()
+    .frame(width: 500)
+}
+
+#Preview("No Language") {
+    CodeBlockView(data: CodeBlockData(
+        code: "Some plain text code without language hint",
+        language: nil
     ))
     .padding()
     .frame(width: 500)
