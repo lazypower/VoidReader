@@ -118,16 +118,7 @@ struct MermaidWebView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            // Auto-fit diagram to container if requested
-            if fitToWidth && diagramWidth > 0 {
-                let containerWidth = webView.bounds.width
-                if containerWidth > 0 && diagramWidth > 0 {
-                    let scale = min(containerWidth / diagramWidth, 3.0) // Cap at 3x
-                    if scale > 1.1 { // Only scale up if meaningfully larger
-                        webView.magnification = scale
-                    }
-                }
-            }
+            // Diagram rendered - magnification can be adjusted by user via pinch
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
