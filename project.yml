@@ -11,6 +11,7 @@ settings:
   base:
     SWIFT_VERSION: "5.9"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
+    DEVELOPMENT_TEAM: 8TYK86NGVA
 
 packages:
   VoidReaderCore:
@@ -32,6 +33,9 @@ targets:
           - Assets.xcassets
     dependencies:
       - package: VoidReaderCore
+      - target: VoidReaderQuickLook
+        embed: true
+        codeSign: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.voidreader.app
@@ -65,6 +69,39 @@ targets:
               public.filename-extension:
                 - md
                 - markdown
+
+  VoidReaderQuickLook:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: QuickLookExtension
+    dependencies:
+      - package: VoidReaderCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.voidreader.app.quicklook
+        PRODUCT_NAME: VoidReaderQuickLook
+        CODE_SIGN_STYLE: Automatic
+        SKIP_INSTALL: YES
+        LD_RUNPATH_SEARCH_PATHS:
+          - $(inherited)
+          - "@executable_path/../Frameworks"
+          - "@executable_path/../../../../Frameworks"
+    info:
+      path: QuickLookExtension/Info.plist
+      properties:
+        CFBundleDisplayName: VoidReader Quick Look
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "14.0"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.quicklook.preview
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).PreviewViewController
+          NSExtensionAttributes:
+            QLSupportsSearchableItems: false
+            QLSupportedContentTypes:
+              - net.daringfireball.markdown
+              - public.plain-text
 
   VoidReaderTests:
     type: bundle.unit-test

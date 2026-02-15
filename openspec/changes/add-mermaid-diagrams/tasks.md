@@ -34,8 +34,8 @@
 - [x] 6.3 Log errors for debugging
 
 ## 7. Testing
-- [ ] 7.1 Test flowchart rendering
-- [ ] 7.2 Test sequence diagram rendering
-- [ ] 7.3 Test class diagram rendering
-- [ ] 7.4 Test theme switching
-- [ ] 7.5 Test invalid mermaid syntax handling
+- [x] 7.1 Test flowchart rendering (manually verified)
+- [x] 7.2 Test sequence diagram rendering (manually verified)
+- [x] 7.3 Test class diagram rendering (manually verified)
+- [x] 7.4 Test theme switching (follows system appearance)
+- [x] 7.5 Test invalid mermaid syntax handling (shows raw code on error)
