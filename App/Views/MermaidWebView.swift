@@ -16,6 +16,7 @@ struct MermaidWebView: NSViewRepresentable {
     @Binding var renderedHeight: CGFloat
     @Binding var hasError: Bool
     var allowsInteraction: Bool = false  // Enable zoom/pan for expanded view
+    var fitToWidth: Bool = false  // Scale diagram to fit container width
     @Environment(\.colorScheme) private var colorScheme
 
     func makeNSView(context: Context) -> WKWebView {
@@ -35,6 +36,9 @@ struct MermaidWebView: NSViewRepresentable {
 
         webView.navigationDelegate = context.coordinator
         webView.setValue(false, forKey: "drawsBackground") // Transparent background
+
+        // Store fitToWidth preference
+        context.coordinator.fitToWidth = fitToWidth
 
         return webView
     }
@@ -84,6 +88,8 @@ struct MermaidWebView: NSViewRepresentable {
         var lastColorScheme: ColorScheme?
         var heightBinding: Binding<CGFloat>
         var errorBinding: Binding<Bool>
+        var fitToWidth: Bool = false
+        var diagramWidth: CGFloat = 0
 
         init(heightBinding: Binding<CGFloat>, errorBinding: Binding<Bool>) {
             self.heightBinding = heightBinding
@@ -92,11 +98,13 @@ struct MermaidWebView: NSViewRepresentable {
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard let body = message.body as? [String: Any],
+                  let width = body["width"] as? Int,
                   let height = body["height"] as? Int else {
                 return
             }
 
             let success = body["success"] as? Bool ?? true
+            diagramWidth = CGFloat(width)
 
             // Update bindings on main thread
             DispatchQueue.main.async {
@@ -110,7 +118,16 @@ struct MermaidWebView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            // Diagram rendered
+            // Auto-fit diagram to container if requested
+            if fitToWidth && diagramWidth > 0 {
+                let containerWidth = webView.bounds.width
+                if containerWidth > 0 && diagramWidth > 0 {
+                    let scale = min(containerWidth / diagramWidth, 3.0) // Cap at 3x
+                    if scale > 1.1 { // Only scale up if meaningfully larger
+                        webView.magnification = scale
+                    }
+                }
+            }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -218,8 +235,8 @@ struct MermaidExpandedOverlay: View {
 
                     Divider()
 
-                    // Interactive diagram - fills available space
-                    MermaidWebView(source: source, renderedHeight: $renderedHeight, hasError: $hasError, allowsInteraction: true)
+                    // Interactive diagram - fills available space, auto-scaled to fit
+                    MermaidWebView(source: source, renderedHeight: $renderedHeight, hasError: $hasError, allowsInteraction: true, fitToWidth: true)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Color(nsColor: .textBackgroundColor))
                 }
