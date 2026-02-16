@@ -1,7 +1,7 @@
 # VoidReader Makefile
 # Run `make help` for available commands
 
-.PHONY: help project build run test clean format lint xcode setup install
+.PHONY: help project build run test clean format lint xcode setup install dmg dmg-signed staple
 
 # Default target
 help:
@@ -12,6 +12,9 @@ help:
 	@echo "  make build     - Build the app (Debug)"
 	@echo "  make release   - Build the app (Release)"
 	@echo "  make install   - Build release and install to /Applications"
+	@echo "  make dmg       - Build release DMG for distribution (unsigned)"
+	@echo "  make dmg-signed - Build signed & notarized DMG (requires Apple Developer ID)"
+	@echo "  make staple    - Staple notarization ticket to existing DMG"
 	@echo "  make run       - Build and run the app"
 	@echo "  make test      - Run all tests"
 	@echo "  make clean     - Clean build artifacts"
@@ -99,3 +102,17 @@ lint:
 xcode: project
 	@echo "Opening Xcode..."
 	open VoidReader.xcodeproj
+
+# Build DMG for distribution (unsigned)
+dmg:
+	@./scripts/build-dmg.sh
+
+# Build signed & notarized DMG
+dmg-signed:
+	@./scripts/build-signed-dmg.sh
+
+# Staple notarization ticket to existing DMG (after Apple approves)
+staple:
+	@echo "Stapling notarization ticket..."
+	xcrun stapler staple build/VoidReader.dmg
+	@echo "✓ Stapled. DMG ready for distribution."

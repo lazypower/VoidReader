@@ -10,6 +10,7 @@ public enum MarkdownBlock: Identifiable {
     case codeBlock(CodeBlockData)
     case image(ImageData)
     case mermaid(MermaidData)
+    case mathBlock(MathData)
 
     public var id: String {
         switch self {
@@ -25,6 +26,8 @@ public enum MarkdownBlock: Identifiable {
             return "image-\(data.id)"
         case .mermaid(let data):
             return "mermaid-\(data.id)"
+        case .mathBlock(let data):
+            return "math-\(data.id)"
         }
     }
 }
@@ -126,5 +129,17 @@ public struct ImageData: Identifiable {
     /// Returns a URL if the source is a valid URL string.
     public var url: URL? {
         URL(string: source)
+    }
+}
+
+/// Data for a LaTeX math block.
+public struct MathData: Identifiable {
+    public let id = UUID()
+    public var latex: String
+    public var isBlock: Bool  // true for $$...$$, false for $...$
+
+    public init(latex: String, isBlock: Bool = true) {
+        self.latex = latex
+        self.isBlock = isBlock
     }
 }

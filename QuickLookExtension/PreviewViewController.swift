@@ -126,6 +126,24 @@ private struct QuickLookBlockView: View {
                     .background(Color(nsColor: .controlBackgroundColor))
                     .cornerRadius(6)
             }
+
+        case .mathBlock(let mathData):
+            // Show LaTeX source in Quick Look (no WebView rendering)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Image(systemName: "function")
+                    Text("Math")
+                }
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+                Text("$$\(mathData.latex)$$")
+                    .font(.system(.caption, design: .monospaced))
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .cornerRadius(6)
+            }
         }
     }
 }

@@ -43,6 +43,9 @@ struct MarkdownReaderView: View {
 
         case .mermaid(let mermaidData):
             MermaidBlockView(data: mermaidData, onExpand: onMermaidExpand)
+
+        case .mathBlock(let mathData):
+            MathBlockView(latex: mathData.latex)
         }
     }
 }
@@ -226,6 +229,9 @@ private struct BlockView: View {
 
         case .mermaid(let mermaidData):
             MermaidBlockView(data: mermaidData, onExpand: onMermaidExpand)
+
+        case .mathBlock(let mathData):
+            MathBlockView(latex: mathData.latex)
         }
     }
 

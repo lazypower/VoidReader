@@ -123,6 +123,13 @@ final class PrintableMarkdownView: NSView {
                 type: .mermaidPlaceholder,
                 frame: NSRect(x: xOffset, y: yOffset, width: contentWidth, height: 48)
             )
+
+        case .mathBlock(let data):
+            // For print, show placeholder with LaTeX source
+            return RenderedBlock(
+                type: .mathPlaceholder(data.latex),
+                frame: NSRect(x: xOffset, y: yOffset, width: contentWidth, height: 32)
+            )
         }
     }
 
@@ -194,6 +201,20 @@ final class PrintableMarkdownView: NSView {
             let text = "[Mermaid Diagram]"
             let textRect = rendered.frame.insetBy(dx: 12, dy: 12)
             (text as NSString).draw(in: textRect, withAttributes: attrs)
+
+        case .mathPlaceholder(let latex):
+            // Draw placeholder showing LaTeX source
+            NSColor(white: 0.95, alpha: 1.0).setFill()
+            let bgPath = NSBezierPath(roundedRect: rendered.frame.insetBy(dx: 0, dy: 4), xRadius: 4, yRadius: 4)
+            bgPath.fill()
+
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+                .foregroundColor: NSColor.secondaryLabelColor
+            ]
+            let displayText = "$$\(latex)$$"
+            let textRect = rendered.frame.insetBy(dx: 12, dy: 8)
+            (displayText as NSString).draw(in: textRect, withAttributes: attrs)
         }
     }
 
@@ -339,6 +360,7 @@ private struct RenderedBlock {
         case taskList([TaskItem])
         case imagePlaceholder(String)
         case mermaidPlaceholder
+        case mathPlaceholder(String)
     }
 
     let type: BlockType

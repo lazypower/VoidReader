@@ -7,11 +7,79 @@ public struct BlockRenderer {
 
     /// Renders markdown text to an array of content blocks.
     public static func render(_ text: String, style: MarkdownRenderer.Style = .init()) -> [MarkdownBlock] {
-        let document = MarkdownParser.parse(text)
-        var walker = BlockWalker(style: style)
-        walker.visit(document)
-        walker.flushTextBuffer()
-        return walker.blocks
+        // Pre-process to extract math blocks ($$...$$)
+        let segments = extractMathBlocks(from: text)
+
+        var allBlocks: [MarkdownBlock] = []
+
+        for segment in segments {
+            switch segment {
+            case .markdown(let mdText):
+                // Parse and render markdown segment
+                let document = MarkdownParser.parse(mdText)
+                var walker = BlockWalker(style: style)
+                walker.visit(document)
+                walker.flushTextBuffer()
+                allBlocks.append(contentsOf: walker.blocks)
+
+            case .math(let latex):
+                // Add math block directly
+                allBlocks.append(.mathBlock(MathData(latex: latex, isBlock: true)))
+            }
+        }
+
+        return allBlocks
+    }
+
+    /// Segments of content: either markdown text or math blocks
+    private enum ContentSegment {
+        case markdown(String)
+        case math(String)
+    }
+
+    /// Extract $$...$$ math blocks from text, returning alternating segments
+    private static func extractMathBlocks(from text: String) -> [ContentSegment] {
+        var segments: [ContentSegment] = []
+        var remaining = text
+        let pattern = "\\$\\$([\\s\\S]*?)\\$\\$"
+
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+            return [.markdown(text)]
+        }
+
+        while true {
+            let range = NSRange(remaining.startIndex..., in: remaining)
+            guard let match = regex.firstMatch(in: remaining, options: [], range: range) else {
+                // No more matches, add remaining text
+                if !remaining.isEmpty {
+                    segments.append(.markdown(remaining))
+                }
+                break
+            }
+
+            // Get the range of the full match and the capture group
+            guard let fullMatchRange = Range(match.range, in: remaining),
+                  let latexRange = Range(match.range(at: 1), in: remaining) else {
+                break
+            }
+
+            // Add text before the match
+            let beforeMatch = String(remaining[..<fullMatchRange.lowerBound])
+            if !beforeMatch.isEmpty {
+                segments.append(.markdown(beforeMatch))
+            }
+
+            // Add the math block (trimmed)
+            let latex = String(remaining[latexRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !latex.isEmpty {
+                segments.append(.math(latex))
+            }
+
+            // Continue with remaining text
+            remaining = String(remaining[fullMatchRange.upperBound...])
+        }
+
+        return segments
     }
 }
 
