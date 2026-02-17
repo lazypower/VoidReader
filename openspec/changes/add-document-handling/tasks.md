@@ -49,12 +49,11 @@
 - [x] 8.3 Provide rendered content to share sheet
 - [x] 8.4 Support sharing as PDF
 
-## 9. Quick Look Extension (TODO - deferred)
-- [ ] 9.1 Create Quick Look preview extension target
-- [ ] 9.2 Register for markdown UTTypes
-- [ ] 9.3 Render markdown in preview
-- [ ] 9.4 Support light/dark appearance
-<!-- Deferred: Requires separate app extension target, will implement later -->
+## 9. Quick Look Extension
+- [x] 9.1 Create Quick Look preview extension target
+- [x] 9.2 Register for markdown UTTypes
+- [x] 9.3 Render markdown in preview
+- [x] 9.4 Support light/dark appearance
 
 ## 10. Testing
 - [x] 10.1 Test file open via File > Open → reader view

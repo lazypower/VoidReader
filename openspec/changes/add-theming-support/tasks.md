@@ -15,7 +15,7 @@
 - [x] 2.1 Add @AppStorage("selectedThemeID") defaulting to "system"
 - [x] 2.2 Create ThemePreviewSwatch view (color circles showing theme accents)
 - [x] 2.3 Add "Appearance" section to SettingsView with theme Picker
-- [ ] 2.4 Add appearance override picker (System / Always Light / Always Dark)
+- [x] 2.4 Add appearance override picker (System / Always Light / Always Dark)
 - [x] 2.5 Verify "System" theme is default on first launch
 - [x] 2.6 Verify theme and override selections persist across sessions
 
