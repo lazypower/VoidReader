@@ -63,15 +63,17 @@ Each `ThemePalette` has exactly 12 color slots:
 
 These are your syntax highlighting colors:
 
-| Slot | Purpose | Editor Syntax | Reader View |
-|------|---------|---------------|-------------|
-| `mauve` | Headings | `# Heading` markers + text | - |
+| Slot | Purpose | Editor Syntax | Reader View* |
+|------|---------|---------------|--------------|
+| `mauve` | Headings | `# Heading` markers + text | Heading text |
 | `blue` | Links | `[text](url)` | Link text |
-| `green` | Code | `` `inline` `` and ``` blocks | - |
-| `teal` | Lists | `- ` and `1. ` markers | - |
-| `lavender` | Quotes | `> ` markers | - |
+| `green` | Code/Math | `` `inline` `` and ``` blocks | Inline math |
+| `teal` | Lists | `- ` and `1. ` markers | List markers |
+| `lavender` | Quotes | `> ` markers | Blockquote text |
 | `red` | Errors | (reserved for future) | - |
 | `yellow` | Warnings | (reserved for future) | - |
+
+*Reader View colors only apply when "Apply Theme to Reader" is enabled in Settings.
 
 ## Where Colors Apply
 
@@ -88,11 +90,17 @@ The syntax-highlighted markdown source. Uses AST-based highlighting:
 - Body text → `text`
 
 ### 2. Reader View (Read Mode)
-The rendered markdown. For non-System themes:
+The rendered markdown. When "Apply Theme to Reader" is enabled (Settings → Appearance):
 - Body text → `text`
-- Secondary text (list markers, HR) → `subtext0`
+- Headings → `mauve`
 - Links → `blue`
+- List markers → `teal`
+- Blockquotes → `lavender`
+- Inline math → `green`
 - Code backgrounds → `surface0` (with opacity)
+- Secondary text (HR) → `subtext0`
+
+**Note:** By default, reader view uses native macOS semantic colors. Enable "Apply Theme to Reader" to use your theme's palette.
 
 ### 3. Mermaid Diagrams
 Diagrams get `themeVariables` generated from your palette:
