@@ -16,6 +16,7 @@ struct ContentView: View {
     @AppStorage("codeFontFamily") private var codeFontFamily: String = ""
     @AppStorage("fullWidthReader") private var fullWidthReader: Bool = false
     @AppStorage("selectedThemeID") private var selectedThemeID: String = "system"
+    @AppStorage("applyThemeToReader") private var applyThemeToReader: Bool = false
     @AppStorage("appearanceOverride") private var appearanceOverride: String = "system"
 
     // Formatting settings
@@ -254,8 +255,8 @@ struct ContentView: View {
             style.codeFontFamily = codeFontFamily
         }
 
-        // Apply theme colors for non-System themes
-        if !currentTheme.isSystemTheme {
+        // Apply theme colors to reader only if enabled (editor always uses theme)
+        if applyThemeToReader && !currentTheme.isSystemTheme {
             let palette = currentTheme.palette(for: effectiveColorScheme)
             style.textColor = palette.text
             style.secondaryColor = palette.subtext0
@@ -266,7 +267,7 @@ struct ContentView: View {
             style.blockquoteColor = palette.lavender
             style.mathColor = palette.green
         }
-        // For System theme, leave colors as nil to use semantic macOS colors
+        // When disabled or System theme, leave colors as nil to use semantic macOS colors
 
         return style
     }
@@ -294,7 +295,7 @@ struct ContentView: View {
 
     /// Combined trigger for re-rendering (consolidates multiple onChange handlers)
     private var renderTrigger: String {
-        "\(readerFontFamily)-\(readerFontSize)-\(codeFontFamily)-\(selectedThemeID)-\(systemColorScheme)-\(appearanceOverride)"
+        "\(readerFontFamily)-\(readerFontSize)-\(codeFontFamily)-\(selectedThemeID)-\(applyThemeToReader)-\(systemColorScheme)-\(appearanceOverride)"
     }
 
     private func increaseFontSize() {

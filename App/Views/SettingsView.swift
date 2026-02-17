@@ -5,6 +5,7 @@ import VoidReaderCore
 /// Settings window for VoidReader preferences.
 struct SettingsView: View {
     @AppStorage("selectedThemeID") private var selectedThemeID: String = "system"
+    @AppStorage("applyThemeToReader") private var applyThemeToReader: Bool = false
     @AppStorage("appearanceOverride") private var appearanceOverride: String = "system"
     @AppStorage("readerFontFamily") private var readerFontFamily: String = ""
     @AppStorage("readerFontSize") private var readerFontSize: Double = 16.0
@@ -34,6 +35,9 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.menu)
+
+                Toggle("Apply Theme to Reader", isOn: $applyThemeToReader)
+                    .help("When off, reader uses native macOS colors. Editor always uses the selected theme.")
 
                 // Appearance override
                 Picker("Appearance", selection: $appearanceOverride) {
