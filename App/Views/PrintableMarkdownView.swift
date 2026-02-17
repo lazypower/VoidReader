@@ -36,15 +36,38 @@ final class PrintableMarkdownView: NSView {
         pageSize.width - margins.left - margins.right
     }
 
+    private var contentHeight: CGFloat {
+        pageSize.height - margins.top - margins.bottom
+    }
+
     private func calculateLayout() {
         let blocks = BlockRenderer.render(text)
         renderedBlocks = []
         var yOffset: CGFloat = margins.top
+        var currentPage: Int = 0
 
         for block in blocks {
             let rendered = layoutBlock(block, at: yOffset)
-            renderedBlocks.append(rendered)
-            yOffset += rendered.height + 12 // Block spacing
+            let blockBottom = rendered.frame.maxY
+            let pageBottom = CGFloat(currentPage) * pageSize.height + pageSize.height - margins.bottom
+
+            // Check if block would extend past page bottom (with 20px tolerance)
+            if blockBottom > pageBottom - 20 && rendered.height < contentHeight {
+                // Move to next page
+                currentPage += 1
+                yOffset = CGFloat(currentPage) * pageSize.height + margins.top
+
+                // Re-layout block at new position
+                let movedRendered = RenderedBlock(
+                    type: rendered.type,
+                    frame: NSRect(x: rendered.frame.minX, y: yOffset, width: rendered.frame.width, height: rendered.frame.height)
+                )
+                renderedBlocks.append(movedRendered)
+                yOffset += movedRendered.height + 12
+            } else {
+                renderedBlocks.append(rendered)
+                yOffset += rendered.height + 12 // Block spacing
+            }
         }
 
         totalHeight = yOffset + margins.bottom
