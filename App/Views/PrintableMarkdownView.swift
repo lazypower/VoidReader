@@ -8,13 +8,15 @@ final class PrintableMarkdownView: NSView {
     private let text: String
     private let pageSize: NSSize
     private let margins: NSEdgeInsets
+    private let mermaidImages: [String: NSImage]
 
     // Calculated layout
     private var renderedBlocks: [RenderedBlock] = []
     private var totalHeight: CGFloat = 0
 
-    init(text: String, pageSize: NSSize = NSSize(width: 612, height: 792), margins: NSEdgeInsets = NSEdgeInsets(top: 72, left: 72, bottom: 72, right: 72)) {
+    init(text: String, mermaidImages: [String: NSImage] = [:], pageSize: NSSize = NSSize(width: 612, height: 792), margins: NSEdgeInsets = NSEdgeInsets(top: 72, left: 72, bottom: 72, right: 72)) {
         self.text = text
+        self.mermaidImages = mermaidImages
         self.pageSize = pageSize
         self.margins = margins
         super.init(frame: .zero)
@@ -117,12 +119,23 @@ final class PrintableMarkdownView: NSView {
                 frame: NSRect(x: xOffset, y: yOffset, width: contentWidth, height: 24)
             )
 
-        case .mermaid:
-            // For print, show placeholder for mermaid diagrams
-            return RenderedBlock(
-                type: .mermaidPlaceholder,
-                frame: NSRect(x: xOffset, y: yOffset, width: contentWidth, height: 48)
-            )
+        case .mermaid(let data):
+            // Use pre-rendered image if available
+            if let image = mermaidImages[data.source] {
+                let aspectRatio = image.size.width / image.size.height
+                let imageWidth = min(contentWidth, image.size.width)
+                let imageHeight = imageWidth / aspectRatio
+                return RenderedBlock(
+                    type: .mermaidImage(image),
+                    frame: NSRect(x: xOffset, y: yOffset, width: imageWidth, height: imageHeight)
+                )
+            } else {
+                // Fallback to placeholder
+                return RenderedBlock(
+                    type: .mermaidPlaceholder,
+                    frame: NSRect(x: xOffset, y: yOffset, width: contentWidth, height: 48)
+                )
+            }
 
         case .mathBlock(let data):
             // For print, show placeholder with LaTeX source
@@ -188,8 +201,12 @@ final class PrintableMarkdownView: NSView {
             let text = "[\(altText)]"
             (text as NSString).draw(in: rendered.frame, withAttributes: attrs)
 
+        case .mermaidImage(let image):
+            // Draw the pre-rendered mermaid diagram
+            image.draw(in: rendered.frame, from: .zero, operation: .sourceOver, fraction: 1.0)
+
         case .mermaidPlaceholder:
-            // Draw placeholder box for mermaid diagram
+            // Draw placeholder box for mermaid diagram (fallback)
             NSColor(white: 0.95, alpha: 1.0).setFill()
             let bgPath = NSBezierPath(roundedRect: rendered.frame.insetBy(dx: 0, dy: 4), xRadius: 4, yRadius: 4)
             bgPath.fill()
@@ -359,6 +376,7 @@ private struct RenderedBlock {
         case table(TableData)
         case taskList([TaskItem])
         case imagePlaceholder(String)
+        case mermaidImage(NSImage)
         case mermaidPlaceholder
         case mathPlaceholder(String)
     }
@@ -372,9 +390,38 @@ private struct RenderedBlock {
 // MARK: - Print Helper
 
 enum DocumentPrinter {
+    /// Extracts mermaid source strings from markdown text.
+    private static func extractMermaidSources(from text: String) -> [String] {
+        let blocks = BlockRenderer.render(text)
+        return blocks.compactMap { block in
+            if case .mermaid(let data) = block {
+                return data.source
+            }
+            return nil
+        }
+    }
+
     /// Prints the given markdown text.
     static func print(text: String, from window: NSWindow?) {
-        let printView = PrintableMarkdownView(text: text)
+        // Extract mermaid sources and render them
+        let mermaidSources = extractMermaidSources(from: text)
+
+        if mermaidSources.isEmpty {
+            // No mermaid diagrams - print directly
+            performPrint(text: text, mermaidImages: [:], window: window)
+        } else {
+            // Pre-render mermaid diagrams
+            Task {
+                let images = await MermaidImageRenderer.renderAll(sources: mermaidSources)
+                await MainActor.run {
+                    performPrint(text: text, mermaidImages: images, window: window)
+                }
+            }
+        }
+    }
+
+    private static func performPrint(text: String, mermaidImages: [String: NSImage], window: NSWindow?) {
+        let printView = PrintableMarkdownView(text: text, mermaidImages: mermaidImages)
 
         let printInfo = NSPrintInfo.shared.copy() as! NSPrintInfo
         printInfo.horizontalPagination = .fit
@@ -407,29 +454,21 @@ enum DocumentPrinter {
         let handler: (NSApplication.ModalResponse) -> Void = { response in
             guard response == .OK, let url = savePanel.url else { return }
 
-            let printView = PrintableMarkdownView(text: text)
+            // Extract mermaid sources and render them
+            let mermaidSources = extractMermaidSources(from: text)
 
-            // Configure print info for PDF output
-            let printInfo = NSPrintInfo()
-            printInfo.paperSize = NSSize(width: 612, height: 792) // US Letter
-            printInfo.topMargin = 72
-            printInfo.bottomMargin = 72
-            printInfo.leftMargin = 72
-            printInfo.rightMargin = 72
-            printInfo.horizontalPagination = .fit
-            printInfo.verticalPagination = .automatic
-            printInfo.isHorizontallyCentered = true
-            printInfo.isVerticallyCentered = false
-
-            // Set to save to file
-            printInfo.jobDisposition = .save
-            printInfo.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = url
-
-            let printOperation = NSPrintOperation(view: printView, printInfo: printInfo)
-            printOperation.showsPrintPanel = false
-            printOperation.showsProgressPanel = true
-
-            printOperation.run()
+            if mermaidSources.isEmpty {
+                // No mermaid diagrams - export directly
+                performExport(text: text, mermaidImages: [:], url: url)
+            } else {
+                // Pre-render mermaid diagrams
+                Task {
+                    let images = await MermaidImageRenderer.renderAll(sources: mermaidSources)
+                    await MainActor.run {
+                        performExport(text: text, mermaidImages: images, url: url)
+                    }
+                }
+            }
         }
 
         if let window = window {
@@ -437,5 +476,31 @@ enum DocumentPrinter {
         } else {
             handler(savePanel.runModal())
         }
+    }
+
+    private static func performExport(text: String, mermaidImages: [String: NSImage], url: URL) {
+        let printView = PrintableMarkdownView(text: text, mermaidImages: mermaidImages)
+
+        // Configure print info for PDF output
+        let printInfo = NSPrintInfo()
+        printInfo.paperSize = NSSize(width: 612, height: 792) // US Letter
+        printInfo.topMargin = 72
+        printInfo.bottomMargin = 72
+        printInfo.leftMargin = 72
+        printInfo.rightMargin = 72
+        printInfo.horizontalPagination = .fit
+        printInfo.verticalPagination = .automatic
+        printInfo.isHorizontallyCentered = true
+        printInfo.isVerticallyCentered = false
+
+        // Set to save to file
+        printInfo.jobDisposition = .save
+        printInfo.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = url
+
+        let printOperation = NSPrintOperation(view: printView, printInfo: printInfo)
+        printOperation.showsPrintPanel = false
+        printOperation.showsProgressPanel = true
+
+        printOperation.run()
     }
 }

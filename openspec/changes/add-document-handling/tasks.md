@@ -32,7 +32,7 @@
 ## 6. Print and Export
 - [x] 6.1 Implement Cmd+P print flow
 - [x] 6.2 Create printable view from rendered markdown
-- [ ] 6.3 Include mermaid diagrams as images in print (blocked: Mermaid not yet implemented)
+- [x] 6.3 Include mermaid diagrams as images in print (pre-rendered via WKWebView snapshot)
 - [x] 6.4 Implement Export as PDF menu item
 - [x] 6.5 Generate PDF from rendered content
 - [x] 6.6 Polish: Paginated vector PDF export (uses NSPrintOperation with save disposition)
