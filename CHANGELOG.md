@@ -4,6 +4,34 @@ All notable changes to VoidReader. We actually read markdown here.
 
 ---
 
+## [1.0.0] - 2026-02-17
+
+### The "We Actually Shipped" Release
+
+VoidReader is complete. Every feature polished. Every pixel considered.
+
+#### Added
+
+- **Custom Document Icon** - Galaxy-themed beauty for your .md files (designed by Fiona)
+- **Reader Theming Toggle** - Apply theme to reader view, or keep it native macOS
+- **Inline Math Rendering** - `$...$` now renders with styled monospace text
+- **Images in Print/PDF** - Document images and mermaid diagrams render in exports
+- **Paginated PDF Export** - Proper multi-page output with intelligent page breaks
+
+#### Fixed
+
+- Blocks no longer get guillotined at page boundaries
+- Theme toggle updates reader view immediately
+- PDF export uses vector rendering via NSPrintOperation
+
+#### The Numbers
+
+- 9 OpenSpec capabilities: all complete
+- 0 Electron: as promised
+- 1 beautiful app: shipped
+
+---
+
 ## [0.3.0] - 2026-02-16
 
 ### The Judgmental Release

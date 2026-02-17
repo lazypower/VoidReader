@@ -51,7 +51,7 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: VoidReader
-        CFBundleShortVersionString: "0.3.0"
+        CFBundleShortVersionString: "1.0.0"
         CFBundleVersion: "1"
         LSMinimumSystemVersion: "14.0"
         CFBundleDocumentTypes:
@@ -97,7 +97,7 @@ targets:
       path: QuickLookExtension/Info.plist
       properties:
         CFBundleDisplayName: VoidReader Quick Look
-        CFBundleShortVersionString: "0.3.0"
+        CFBundleShortVersionString: "1.0.0"
         CFBundleVersion: "1"
         LSMinimumSystemVersion: "14.0"
         NSExtension:
