@@ -17,7 +17,7 @@
 - [x] 3.1 Create ImageCache with disk-backed storage
 - [x] 3.2 Cache remote images after first fetch
 - [x] 3.3 Implement cache expiration policy (24h default)
-- [ ] 3.4 Handle cache size limits (disk)
+- [x] 3.4 Handle cache size limits (disk) - 100MB max, FIFO eviction
 - [x] 3.5 Cache location: ~/Library/Caches/VoidReader/images/
 
 ## 4. Image Display

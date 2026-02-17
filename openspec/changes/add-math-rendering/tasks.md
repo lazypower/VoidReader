@@ -7,9 +7,9 @@
 - [x] 1.4 Verify resources load at runtime
 
 ## 2. Math Block Detection
-- [ ] 2.1 Detect inline math delimiters `$...$`
+- [x] 2.1 Detect inline math delimiters `$...$` (styled text, not KaTeX)
 - [x] 2.2 Detect block math delimiters `$$...$$`
-- [ ] 2.3 Escape handling (ignore `\$` escaped dollars)
+- [x] 2.3 Escape handling (ignore `\$` escaped dollars)
 - [x] 2.4 Pass math expressions to renderer with context (inline vs block)
 
 ## 3. WebView Renderer
@@ -21,9 +21,9 @@
 
 ## 4. Integration
 - [x] 4.1 Create MathBlockView for display math ($$)
-- [ ] 4.2 Create InlineMathView for inline math ($)
+- [x] 4.2 Inline math rendered as styled text (monospace purple) - no separate view needed
 - [x] 4.3 Integrate math expressions into document flow
-- [ ] 4.4 Ensure proper baseline alignment for inline math
+- [x] 4.4 Baseline alignment natural with styled text approach
 
 ## 5. Theming
 - [x] 5.1 Detect system appearance (light/dark)

@@ -111,6 +111,7 @@ actor ImageCache {
     private let cacheDirectory: URL
     private let maxMemoryCacheCount = 50
     private let cacheExpiration: TimeInterval = 24 * 60 * 60 // 24 hours
+    private let maxDiskCacheSize: Int = 100 * 1024 * 1024 // 100 MB
 
     init() {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
@@ -120,8 +121,19 @@ actor ImageCache {
         try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
     }
 
+    /// Called on first cache access to prune stale entries.
+    private var hasPrunedOnStartup = false
+    private func pruneOnStartupIfNeeded() {
+        guard !hasPrunedOnStartup else { return }
+        hasPrunedOnStartup = true
+        pruneIfNeeded()
+    }
+
     /// Retrieves an image from cache.
     func image(for key: String) -> NSImage? {
+        // Prune on first access
+        pruneOnStartupIfNeeded()
+
         // Check memory cache
         if let image = memoryCache[key] {
             return image
@@ -190,6 +202,44 @@ actor ImageCache {
         }
 
         try? pngData.write(to: fileURL)
+
+        // Prune if over size limit
+        pruneIfNeeded()
+    }
+
+    /// Prunes cache if total size exceeds limit, deleting oldest files first.
+    private func pruneIfNeeded() {
+        let fm = FileManager.default
+
+        guard let files = try? fm.contentsOfDirectory(
+            at: cacheDirectory,
+            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey],
+            options: .skipsHiddenFiles
+        ) else { return }
+
+        // Get file info sorted by modification date (oldest first)
+        var fileInfos: [(url: URL, size: Int, date: Date)] = []
+        var totalSize = 0
+
+        for file in files {
+            guard let attrs = try? file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
+                  let size = attrs.fileSize,
+                  let date = attrs.contentModificationDate else { continue }
+            fileInfos.append((url: file, size: size, date: date))
+            totalSize += size
+        }
+
+        // If under limit, nothing to do
+        guard totalSize > maxDiskCacheSize else { return }
+
+        // Sort by date (oldest first) and delete until under limit
+        fileInfos.sort { $0.date < $1.date }
+
+        for info in fileInfos {
+            guard totalSize > maxDiskCacheSize else { break }
+            try? fm.removeItem(at: info.url)
+            totalSize -= info.size
+        }
     }
 
     private func cacheFileURL(for key: String) -> URL {
