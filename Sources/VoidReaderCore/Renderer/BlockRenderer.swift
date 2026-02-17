@@ -362,13 +362,59 @@ struct BlockWalker: MarkupWalker {
     // MARK: - Inline Elements
 
     mutating func visitText(_ text: Markdown.Text) {
-        var textString = AttributedString(text.string)
-        textString.font = currentFont()
-        textString.foregroundColor = style.resolvedTextColor
-        if isStrikethrough {
-            textString.strikethroughStyle = .single
+        let source = text.string
+
+        // Check for inline math
+        let mathMatches = InlineMathParser.extract(from: source)
+
+        if mathMatches.isEmpty {
+            // No math - render as plain text
+            var textString = AttributedString(source)
+            textString.font = currentFont()
+            textString.foregroundColor = style.resolvedTextColor
+            if isStrikethrough {
+                textString.strikethroughStyle = .single
+            }
+            textBuffer += textString
+        } else {
+            // Has inline math - render segments
+            var currentIndex = source.startIndex
+
+            for match in mathMatches {
+                // Render text before this match
+                if currentIndex < match.range.lowerBound {
+                    let beforeText = String(source[currentIndex..<match.range.lowerBound])
+                    var beforeString = AttributedString(beforeText)
+                    beforeString.font = currentFont()
+                    beforeString.foregroundColor = style.resolvedTextColor
+                    if isStrikethrough {
+                        beforeString.strikethroughStyle = .single
+                    }
+                    textBuffer += beforeString
+                }
+
+                // Render the math expression (styled)
+                var mathString = AttributedString(match.latex)
+                mathString.font = .system(size: style.codeSize, design: .monospaced)
+                mathString.foregroundColor = style.resolvedMathColor
+                mathString.backgroundColor = style.resolvedCodeBackground
+                textBuffer += mathString
+
+                currentIndex = match.range.upperBound
+            }
+
+            // Render remaining text after last match
+            if currentIndex < source.endIndex {
+                let afterText = String(source[currentIndex...])
+                var afterString = AttributedString(afterText)
+                afterString.font = currentFont()
+                afterString.foregroundColor = style.resolvedTextColor
+                if isStrikethrough {
+                    afterString.strikethroughStyle = .single
+                }
+                textBuffer += afterString
+            }
         }
-        textBuffer += textString
     }
 
     mutating func visitStrong(_ strong: Strong) {
@@ -447,9 +493,37 @@ struct BlockWalker: MarkupWalker {
         var result = AttributedString()
         for child in markup.children {
             if let text = child as? Markdown.Text {
-                var str = AttributedString(text.string)
-                str.font = style.makeFont(size: style.bodySize)
-                result += str
+                // Check for inline math in text
+                let source = text.string
+                let mathMatches = InlineMathParser.extract(from: source)
+
+                if mathMatches.isEmpty {
+                    var str = AttributedString(source)
+                    str.font = style.makeFont(size: style.bodySize)
+                    result += str
+                } else {
+                    var currentIndex = source.startIndex
+                    for match in mathMatches {
+                        if currentIndex < match.range.lowerBound {
+                            let beforeText = String(source[currentIndex..<match.range.lowerBound])
+                            var beforeString = AttributedString(beforeText)
+                            beforeString.font = style.makeFont(size: style.bodySize)
+                            result += beforeString
+                        }
+                        var mathString = AttributedString(match.latex)
+                        mathString.font = .system(size: style.codeSize, design: .monospaced)
+                        mathString.foregroundColor = style.resolvedMathColor
+                        mathString.backgroundColor = style.resolvedCodeBackground
+                        result += mathString
+                        currentIndex = match.range.upperBound
+                    }
+                    if currentIndex < source.endIndex {
+                        let afterText = String(source[currentIndex...])
+                        var afterString = AttributedString(afterText)
+                        afterString.font = style.makeFont(size: style.bodySize)
+                        result += afterString
+                    }
+                }
             } else if let strong = child as? Strong {
                 var str = renderInlineContent(strong)
                 str.font = style.makeFont(size: style.bodySize, weight: .bold)

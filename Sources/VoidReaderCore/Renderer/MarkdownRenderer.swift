@@ -33,6 +33,7 @@ public struct MarkdownRenderer {
         public var secondaryColor: Color? = nil     // nil → .secondary
         public var linkColor: Color? = nil          // nil → Color.accentColor
         public var codeBackground: Color? = nil     // nil → quaternaryLabelColor
+        public var mathColor: Color? = nil          // nil → purple accent for math
 
         public init() {}
 
@@ -54,6 +55,11 @@ public struct MarkdownRenderer {
         /// Resolved code background (semantic or themed)
         public var resolvedCodeBackground: Color {
             codeBackground ?? Color(nsColor: .quaternaryLabelColor).opacity(0.5)
+        }
+
+        /// Resolved math color (semantic or themed)
+        public var resolvedMathColor: Color {
+            mathColor ?? Color.purple
         }
 
         /// Creates a font with the configured family
@@ -287,10 +293,50 @@ struct AttributedStringWalker: MarkupWalker {
     // MARK: - Inline Elements
 
     mutating func visitText(_ text: Markdown.Text) -> () {
-        var textString = AttributedString(text.string)
-        textString.font = currentFont()
-        textString.foregroundColor = style.resolvedTextColor
-        result += textString
+        let source = text.string
+
+        // Check for inline math
+        let mathMatches = InlineMathParser.extract(from: source)
+
+        if mathMatches.isEmpty {
+            // No math - render as plain text
+            var textString = AttributedString(source)
+            textString.font = currentFont()
+            textString.foregroundColor = style.resolvedTextColor
+            result += textString
+        } else {
+            // Has inline math - render segments
+            var currentIndex = source.startIndex
+
+            for match in mathMatches {
+                // Render text before this match
+                if currentIndex < match.range.lowerBound {
+                    let beforeText = String(source[currentIndex..<match.range.lowerBound])
+                    var beforeString = AttributedString(beforeText)
+                    beforeString.font = currentFont()
+                    beforeString.foregroundColor = style.resolvedTextColor
+                    result += beforeString
+                }
+
+                // Render the math expression (styled)
+                var mathString = AttributedString(match.latex)
+                mathString.font = .system(size: style.codeSize, design: .monospaced)
+                mathString.foregroundColor = style.resolvedMathColor
+                mathString.backgroundColor = style.resolvedCodeBackground
+                result += mathString
+
+                currentIndex = match.range.upperBound
+            }
+
+            // Render remaining text after last match
+            if currentIndex < source.endIndex {
+                let afterText = String(source[currentIndex...])
+                var afterString = AttributedString(afterText)
+                afterString.font = currentFont()
+                afterString.foregroundColor = style.resolvedTextColor
+                result += afterString
+            }
+        }
     }
 
     mutating func visitStrong(_ strong: Strong) -> () {
