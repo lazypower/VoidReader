@@ -16,6 +16,13 @@ struct ContentView: View {
     @AppStorage("codeFontFamily") private var codeFontFamily: String = ""
     @AppStorage("selectedThemeID") private var selectedThemeID: String = "system"
     @AppStorage("appearanceOverride") private var appearanceOverride: String = "system"
+
+    // Formatting settings
+    @AppStorage("formatOnSave") private var formatOnSave: Bool = false
+    @AppStorage("listMarkerStyle") private var listMarkerStyle: String = "-"
+    @AppStorage("emphasisMarkerStyle") private var emphasisMarkerStyle: String = "*"
+    @AppStorage("disabledLintRules") private var disabledLintRules: String = ""
+
     @Environment(\.colorScheme) private var systemColorScheme
     @State private var showCheatSheet = false
     @State private var isDistractionFree = false
@@ -32,10 +39,11 @@ struct ContentView: View {
     @State private var textUpdatePublisher = PassthroughSubject<String, Never>()
     @State private var cancellables = Set<AnyCancellable>()
 
-    // For print/export/share commands
+    // For print/export/share/format commands
     private let printPublisher = NotificationCenter.default.publisher(for: .printDocument)
     private let exportPDFPublisher = NotificationCenter.default.publisher(for: .exportPDF)
     private let sharePublisher = NotificationCenter.default.publisher(for: .shareDocument)
+    private let formatDocumentPublisher = NotificationCenter.default.publisher(for: .formatDocument)
 
     // Share sheet state
     @State private var showingShare = false
@@ -60,6 +68,10 @@ struct ContentView: View {
     // Cached rendered blocks (expensive to compute)
     @State private var renderedBlocks: [MarkdownBlock] = []
 
+    // Lint warnings
+    @State private var lintWarnings: [LintWarning] = []
+    @State private var lintUpdatePublisher = PassthroughSubject<String, Never>()
+
     // Mermaid expand overlay
     @State private var expandedMermaidSource: String?
 
@@ -70,6 +82,7 @@ struct ContentView: View {
     @State private var fileWatcher: FileWatcher?
     @State private var lastKnownModDate: Date?
     @State private var showExternalChangeAlert = false
+    @State private var suppressExternalChangeAlert = false
     @State private var showSaveConflictAlert = false
     @State private var pendingSaveAction: (() -> Void)?
 
@@ -136,14 +149,12 @@ struct ContentView: View {
             setupDebouncing()
         }
         .onChange(of: document.text) { _, newValue in
-            // Send to debounce publisher for preview
+            // Send to debounce publisher for expensive operations
             textUpdatePublisher.send(newValue)
             // Update stats immediately (cheap operation)
             documentStats = DocumentStats(text: newValue)
-            // Update headings for outline
-            updateHeadings(from: newValue)
-            // Update cached blocks
-            updateRenderedBlocks(from: newValue)
+            // Send to lint debouncer (500ms)
+            lintUpdatePublisher.send(newValue)
         }
         .onAppear {
             updateHeadings(from: document.text)
@@ -182,6 +193,9 @@ struct ContentView: View {
         .onReceive(sharePublisher) { _ in
             showingShare = true
         }
+        .onReceive(formatDocumentPublisher) { _ in
+            formatDocument()
+        }
         .onChange(of: searchText) { _, _ in
             updateSearch()
         }
@@ -191,19 +205,7 @@ struct ContentView: View {
         .onChange(of: useRegex) { _, _ in
             updateSearch()
         }
-        .onChange(of: readerFontFamily) { _, _ in
-            updateRenderedBlocks(from: document.text)
-        }
-        .onChange(of: codeFontFamily) { _, _ in
-            updateRenderedBlocks(from: document.text)
-        }
-        .onChange(of: selectedThemeID) { _, _ in
-            updateRenderedBlocks(from: document.text)
-        }
-        .onChange(of: systemColorScheme) { _, _ in
-            updateRenderedBlocks(from: document.text)
-        }
-        .onChange(of: appearanceOverride) { _, _ in
+        .onChange(of: renderTrigger) { _, _ in
             updateRenderedBlocks(from: document.text)
         }
         .background(ShareSheetPresenter(isPresented: $showingShare, items: [document.text]))
@@ -281,6 +283,11 @@ struct ContentView: View {
         case "dark": return .dark
         default: return systemColorScheme
         }
+    }
+
+    /// Combined trigger for re-rendering (consolidates multiple onChange handlers)
+    private var renderTrigger: String {
+        "\(readerFontFamily)-\(readerFontSize)-\(codeFontFamily)-\(selectedThemeID)-\(systemColorScheme)-\(appearanceOverride)"
     }
 
     private func increaseFontSize() {
@@ -380,7 +387,7 @@ struct ContentView: View {
 
                 // Status bar
                 if showStatusBar {
-                    StatusBarView(stats: documentStats)
+                    StatusBarView(stats: documentStats, warningCount: lintWarnings.count)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
@@ -632,10 +639,21 @@ struct ContentView: View {
     }
 
     private func setupDebouncing() {
+        // Debounce expensive operations (150ms) - parsing, rendering, outline
         textUpdatePublisher
             .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
-            .sink { newText in
+            .sink { [self] newText in
                 debouncedText = newText
+                updateHeadings(from: newText)
+                updateRenderedBlocks(from: newText)
+            }
+            .store(in: &cancellables)
+
+        // Lint debouncing (500ms to avoid excessive linting while typing)
+        lintUpdatePublisher
+            .debounce(for: .milliseconds(500), scheduler: RunLoop.main)
+            .sink { [self] text in
+                updateLintWarnings(for: text)
             }
             .store(in: &cancellables)
     }
@@ -650,6 +668,12 @@ struct ContentView: View {
 
         // Set up watcher for external changes
         fileWatcher = FileWatcher(url: url) { [self] in
+            // Ignore if we're suppressing (our own format/save in progress)
+            guard !suppressExternalChangeAlert else {
+                lastKnownModDate = url.fileModificationDate
+                return
+            }
+
             // Check if file actually changed (not just touched)
             guard let currentModDate = url.fileModificationDate,
                   let lastKnown = lastKnownModDate,
@@ -793,6 +817,38 @@ struct ContentView: View {
         document.text = MarkdownTextUtils.toggleTask(in: document.text, at: index, to: newState)
     }
 
+    // MARK: - Formatting
+
+    private func formatDocument() {
+        let options = FormatterOptions(
+            listMarker: FormatterOptions.ListMarkerStyle(rawValue: listMarkerStyle) ?? .dash,
+            emphasisMarker: FormatterOptions.EmphasisMarkerStyle(rawValue: emphasisMarkerStyle) ?? .star
+        )
+
+        let formatted = MarkdownFormatter.format(document.text, options: options)
+        if formatted != document.text {
+            // Suppress file watcher alert for our own save
+            suppressExternalChangeAlert = true
+            document.text = formatted
+
+            // Clear suppression and update mod date after save completes
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [self] in
+                suppressExternalChangeAlert = false
+                lastKnownModDate = fileURL?.fileModificationDate
+            }
+        }
+    }
+
+    // MARK: - Linting
+
+    private func updateLintWarnings(for text: String) {
+        // Build set of enabled rules (all rules minus disabled ones)
+        let disabled = Set(disabledLintRules.split(separator: ",").map(String.init))
+        let enabled = MarkdownLinter.allRuleIDs.subtracting(disabled)
+
+        lintWarnings = MarkdownLinter.lint(text, enabledRules: enabled)
+    }
+
     private var editorView: some View {
         ResizableSplitView(
             leftFraction: Binding(
@@ -805,7 +861,8 @@ struct ContentView: View {
                 text: $document.text,
                 theme: currentTheme,
                 colorScheme: effectiveColorScheme,
-                font: NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+                font: NSFont.monospacedSystemFont(ofSize: 14, weight: .regular),
+                lintWarnings: lintWarnings
             )
         } right: {
             // Preview (uses debounced text and cached blocks for performance)

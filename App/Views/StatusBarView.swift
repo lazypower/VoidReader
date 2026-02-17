@@ -5,6 +5,7 @@ import VoidReaderCore
 struct StatusBarView: View {
     let stats: DocumentStats
     var selectionStats: DocumentStats?
+    var warningCount: Int = 0
 
     var body: some View {
         HStack(spacing: 16) {
@@ -33,6 +34,20 @@ struct StatusBarView: View {
             )
 
             Spacer()
+
+            // Lint warnings
+            if warningCount > 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                        .foregroundColor(.yellow)
+                    Text("\(warningCount)")
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.yellow.opacity(0.15))
+                .cornerRadius(4)
+            }
 
             // Selection indicator
             if selectionStats != nil {

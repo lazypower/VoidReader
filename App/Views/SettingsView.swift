@@ -10,6 +10,12 @@ struct SettingsView: View {
     @AppStorage("readerFontSize") private var readerFontSize: Double = 16.0
     @AppStorage("codeFontFamily") private var codeFontFamily: String = ""
 
+    // Formatting settings
+    @AppStorage("formatOnSave") private var formatOnSave: Bool = false
+    @AppStorage("listMarkerStyle") private var listMarkerStyle: String = "-"
+    @AppStorage("emphasisMarkerStyle") private var emphasisMarkerStyle: String = "*"
+    @AppStorage("disabledLintRules") private var disabledLintRules: String = ""
+
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -74,6 +80,52 @@ struct SettingsView: View {
                 Text("Code Blocks")
             }
 
+            // MARK: - Formatting Section
+            Section {
+                Toggle("Format on Save", isOn: $formatOnSave)
+
+                Picker("List Markers", selection: $listMarkerStyle) {
+                    ForEach(FormatterOptions.ListMarkerStyle.allCases) { style in
+                        Text(style.displayName).tag(style.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Picker("Emphasis Markers", selection: $emphasisMarkerStyle) {
+                    ForEach(FormatterOptions.EmphasisMarkerStyle.allCases) { style in
+                        Text(style.displayName).tag(style.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+            } header: {
+                Text("Formatting")
+            } footer: {
+                Text("Format on Save normalizes list markers, removes trailing whitespace, and collapses multiple blank lines.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            // MARK: - Lint Rules Section
+            Section {
+                ForEach(MarkdownLinter.allRules, id: \.id) { rule in
+                    Toggle(isOn: lintRuleBinding(for: rule.id)) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(rule.id)
+                                .font(.body.monospaced())
+                            Text(rule.description)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            } header: {
+                Text("Lint Rules")
+            } footer: {
+                Text("Disabled rules will not show warnings in the editor.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
             Section {
                 Text("Use **Cmd +/-** to quickly adjust font size")
                     .font(.caption)
@@ -86,7 +138,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(minWidth: 450, idealWidth: 500, minHeight: 380, idealHeight: 420)
+        .frame(minWidth: 450, idealWidth: 500, minHeight: 500, idealHeight: 600)
     }
 
     /// Effective color scheme based on override setting
@@ -96,6 +148,25 @@ struct SettingsView: View {
         case "dark": return .dark
         default: return colorScheme
         }
+    }
+
+    /// Creates a binding for a lint rule's enabled state.
+    private func lintRuleBinding(for ruleID: String) -> Binding<Bool> {
+        Binding(
+            get: {
+                let disabled = Set(disabledLintRules.split(separator: ",").map(String.init))
+                return !disabled.contains(ruleID)
+            },
+            set: { isEnabled in
+                var disabled = Set(disabledLintRules.split(separator: ",").map(String.init))
+                if isEnabled {
+                    disabled.remove(ruleID)
+                } else {
+                    disabled.insert(ruleID)
+                }
+                disabledLintRules = disabled.sorted().joined(separator: ",")
+            }
+        )
     }
 }
 
