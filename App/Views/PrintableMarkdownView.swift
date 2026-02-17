@@ -407,22 +407,29 @@ enum DocumentPrinter {
         let handler: (NSApplication.ModalResponse) -> Void = { response in
             guard response == .OK, let url = savePanel.url else { return }
 
-            // Create the view and render directly to PDF data
             let printView = PrintableMarkdownView(text: text)
 
-            // Use dataWithPDF to render directly without printer
-            let pdfData = printView.dataWithPDF(inside: printView.bounds)
+            // Configure print info for PDF output
+            let printInfo = NSPrintInfo()
+            printInfo.paperSize = NSSize(width: 612, height: 792) // US Letter
+            printInfo.topMargin = 72
+            printInfo.bottomMargin = 72
+            printInfo.leftMargin = 72
+            printInfo.rightMargin = 72
+            printInfo.horizontalPagination = .fit
+            printInfo.verticalPagination = .automatic
+            printInfo.isHorizontallyCentered = true
+            printInfo.isVerticallyCentered = false
 
-            do {
-                try pdfData.write(to: url)
-            } catch {
-                // Show error alert
-                let alert = NSAlert()
-                alert.messageText = "Export Failed"
-                alert.informativeText = error.localizedDescription
-                alert.alertStyle = .warning
-                alert.runModal()
-            }
+            // Set to save to file
+            printInfo.jobDisposition = .save
+            printInfo.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = url
+
+            let printOperation = NSPrintOperation(view: printView, printInfo: printInfo)
+            printOperation.showsPrintPanel = false
+            printOperation.showsProgressPanel = true
+
+            printOperation.run()
         }
 
         if let window = window {

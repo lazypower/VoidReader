@@ -35,7 +35,7 @@
 - [ ] 6.3 Include mermaid diagrams as images in print (blocked: Mermaid not yet implemented)
 - [x] 6.4 Implement Export as PDF menu item
 - [x] 6.5 Generate PDF from rendered content
-- [ ] 6.6 Polish: Paginated vector PDF export (current impl is single-page raster via dataWithPDF; proper impl needs CGContext with manual page breaks)
+- [x] 6.6 Polish: Paginated vector PDF export (uses NSPrintOperation with save disposition)
 
 ## 7. Scroll Position Memory
 - [x] 7.1 Track scroll position per document
