@@ -45,8 +45,8 @@
 - [x] 7.3 Graceful fallback for remote images in Quick Look
 
 ## 8. Testing
-- [ ] 8.1 Test local image loading (various relative paths)
-- [ ] 8.2 Test remote image loading
-- [ ] 8.3 Test cache behavior
-- [ ] 8.4 Test failure states (missing file, network error)
-- [ ] 8.5 Test format support (PNG, JPG, GIF, WebP, SVG)
+- [x] 8.1 Test local image loading - unit tests for path resolution + VIBE_CHECK.md
+- [x] 8.2 Test remote image loading - VIBE_CHECK.md uses picsum.photos
+- [x] 8.3 Test cache behavior - unit tests for cache key generation
+- [x] 8.4 Test failure states - visual verification (alt text displays on failure)
+- [x] 8.5 Test format support - VIBE_CHECK.md exercises PNG; other formats verified manually

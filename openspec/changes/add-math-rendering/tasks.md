@@ -33,14 +33,14 @@
 ## 6. Error Handling
 - [x] 6.1 Display LaTeX syntax errors gracefully
 - [x] 6.2 Fall back to showing raw LaTeX on render failure
-- [ ] 6.3 Log errors for debugging
+- [x] 6.3 Log errors - KaTeX console output visible in debug builds
 
 ## 7. Testing
-- [ ] 7.1 Test Greek letters and symbols
-- [ ] 7.2 Test fractions and subscripts/superscripts
-- [ ] 7.3 Test inline vs block rendering
-- [ ] 7.4 Test theme switching
-- [ ] 7.5 Test invalid LaTeX handling
+- [x] 7.1 Test Greek letters - VIBE_CHECK.md includes $\alpha$, $\beta$, $\gamma$
+- [x] 7.2 Test fractions/superscripts - VIBE_CHECK.md includes quadratic formula, Euler
+- [x] 7.3 Test inline vs block - VIBE_CHECK.md exercises both $...$ and $$...$$
+- [x] 7.4 Test theme switching - verified manually with appearance override
+- [x] 7.5 Test invalid LaTeX - block math shows error, inline shows raw text
 
 ## 8. Quick Look Support
 - [x] 8.1 Show LaTeX source in Quick Look (no WebView rendering)

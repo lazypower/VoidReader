@@ -61,8 +61,8 @@
 - [x] 10.3 Test double-click from Finder → reader view
 - [x] 10.4 Test app launch without file → editor view
 - [x] 10.5 Test File > New → editor view
-- [ ] 10.6 Test recent documents menu
-- [ ] 10.7 Test print output
-- [ ] 10.8 Test PDF export
-- [ ] 10.9 Test scroll position restores
-- [ ] 10.10 Test Quick Look preview in Finder
+- [x] 10.6 Test recent documents - verified via File > Open Recent menu
+- [x] 10.7 Test print output - verified via Cmd+P with VIBE_CHECK.md
+- [x] 10.8 Test PDF export - verified via File > Export as PDF
+- [x] 10.9 Test scroll position - verified manually (reopens at last position)
+- [x] 10.10 Test Quick Look - verified via spacebar preview in Finder
