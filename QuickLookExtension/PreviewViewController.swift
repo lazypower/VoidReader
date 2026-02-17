@@ -24,7 +24,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         }
 
         // Create the SwiftUI preview view
-        let previewView = QuickLookPreviewView(text: text)
+        let previewView = QuickLookPreviewView(text: text, documentURL: url)
         let hostingView = NSHostingView(rootView: previewView)
         hostingView.translatesAutoresizingMaskIntoConstraints = false
 
@@ -44,12 +44,13 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 /// SwiftUI view for Quick Look preview - simplified markdown rendering.
 struct QuickLookPreviewView: View {
     let text: String
+    let documentURL: URL
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(BlockRenderer.render(text)) { block in
-                    QuickLookBlockView(block: block)
+                    QuickLookBlockView(block: block, documentURL: documentURL)
                 }
             }
             .padding(24)
@@ -62,6 +63,7 @@ struct QuickLookPreviewView: View {
 /// Simplified block renderer for Quick Look (no interactivity needed).
 private struct QuickLookBlockView: View {
     let block: MarkdownBlock
+    let documentURL: URL
 
     var body: some View {
         switch block {
@@ -99,15 +101,7 @@ private struct QuickLookBlockView: View {
             }
 
         case .image(let imageData):
-            if let url = imageData.url, let nsImage = NSImage(contentsOf: url) {
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: 600)
-            } else {
-                Text("Image: \(imageData.altText)")
-                    .foregroundColor(.secondary)
-            }
+            QuickLookImageView(imageData: imageData, documentURL: documentURL)
 
         case .mermaid(let mermaidData):
             // Show mermaid source in Quick Look (no WKWebView)
@@ -194,5 +188,71 @@ private struct QuickLookTableView: View {
         case .center: return .center
         case .right: return .trailing
         }
+    }
+}
+
+/// Image view for Quick Look - loads local images only (no network requests).
+private struct QuickLookImageView: View {
+    let imageData: ImageData
+    let documentURL: URL
+
+    var body: some View {
+        if let image = loadImage() {
+            VStack(alignment: .leading, spacing: 4) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: 600)
+                    .cornerRadius(6)
+
+                if !imageData.altText.isEmpty {
+                    Text(imageData.altText)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        } else {
+            // Fallback for missing or remote images
+            HStack(spacing: 8) {
+                Image(systemName: "photo")
+                    .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(imageData.altText.isEmpty ? "Image" : imageData.altText)
+                        .foregroundColor(.primary)
+                    Text(imageData.source)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .cornerRadius(6)
+        }
+    }
+
+    private func loadImage() -> NSImage? {
+        let source = imageData.source
+
+        // Remote URLs - skip in Quick Look (no network requests)
+        if source.hasPrefix("http://") || source.hasPrefix("https://") {
+            return nil
+        }
+
+        // Absolute file path
+        if source.hasPrefix("/") {
+            return NSImage(contentsOfFile: source)
+        }
+
+        // Absolute file URL
+        if source.hasPrefix("file://"), let url = URL(string: source) {
+            return NSImage(contentsOf: url)
+        }
+
+        // Relative path - resolve from document directory
+        let documentDirectory = documentURL.deletingLastPathComponent()
+        let resolvedURL = documentDirectory.appendingPathComponent(source).standardized
+        return NSImage(contentsOf: resolvedURL)
     }
 }

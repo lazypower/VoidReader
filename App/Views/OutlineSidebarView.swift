@@ -62,6 +62,7 @@ struct OutlineSidebarView: View {
                 }
                 .focusable()
                 .focused($isFocused)
+                .focusEffectDisabled()
                 .onKeyPress(.downArrow) {
                     moveSelection(by: 1)
                     return .handled

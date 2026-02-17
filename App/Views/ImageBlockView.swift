@@ -1,13 +1,38 @@
 import SwiftUI
 import VoidReaderCore
 
-/// Renders an image with async loading and zoom capability.
+/// Data passed when expanding an image.
+struct ExpandedImageData: Equatable {
+    let image: NSImage
+    let altText: String
+
+    static func == (lhs: ExpandedImageData, rhs: ExpandedImageData) -> Bool {
+        lhs.image === rhs.image && lhs.altText == rhs.altText
+    }
+}
+
+/// Environment key for image expansion handler.
+private struct ImageExpansionKey: EnvironmentKey {
+    static let defaultValue: ((ExpandedImageData) -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    var onImageExpand: ((ExpandedImageData) -> Void)? {
+        get { self[ImageExpansionKey.self] }
+        set { self[ImageExpansionKey.self] = newValue }
+    }
+}
+
+/// Renders an image with async loading, caching, and zoom capability.
 struct ImageBlockView: View {
     let data: ImageData
-    @State private var isZoomed = false
+    let documentURL: URL?
+    var maxWidth: CGFloat? = nil  // nil = use viewport width
+
+    @Environment(\.onImageExpand) private var onExpand
     @State private var loadedImage: NSImage?
     @State private var isLoading = true
-    @State private var loadError: Error?
+    @State private var isHovering = false
 
     var body: some View {
         Group {
@@ -19,162 +44,265 @@ struct ImageBlockView: View {
                 errorView
             }
         }
-        .task {
+        .task(id: data.source) {
             await loadImage()
-        }
-        .sheet(isPresented: $isZoomed) {
-            if let image = loadedImage {
-                ImageZoomView(image: image, altText: data.altText, isPresented: $isZoomed)
-            }
         }
     }
 
+    @ViewBuilder
     private func imageContent(_ image: NSImage) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Image(nsImage: image)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: 600, maxHeight: 400)
-                .cornerRadius(8)
-                .onTapGesture {
-                    isZoomed = true
-                }
-                .help("Click to zoom")
+        let imageSize = image.size
 
+        VStack(alignment: .leading, spacing: 4) {
+            GeometryReader { geo in
+                let constrainedWidth = maxWidth ?? geo.size.width
+                let scale = min(1.0, constrainedWidth / imageSize.width)
+                let displayWidth = imageSize.width * scale
+                let displayHeight = imageSize.height * scale
+
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: displayWidth, height: displayHeight)
+                    .cornerRadius(6)
+                    .overlay(alignment: .topTrailing) {
+                        Button {
+                            onExpand?(ExpandedImageData(image: image, altText: data.altText))
+                        } label: {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.white)
+                                .padding(6)
+                                .background(.black.opacity(0.6))
+                                .cornerRadius(6)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(8)
+                        .opacity(isHovering ? 1 : 0)
+                    }
+                    .animation(.easeInOut(duration: 0.15), value: isHovering)
+                    .onTapGesture(count: 2) {
+                        onExpand?(ExpandedImageData(image: image, altText: data.altText))
+                    }
+                    .help(data.title ?? "Double-click to expand")
+                    .onHover { hovering in
+                        isHovering = hovering
+                    }
+            }
+            .frame(height: calculateDisplayHeight(for: image))
+
+            // Caption (alt text)
             if !data.altText.isEmpty {
                 Text(data.altText)
                     .font(.caption)
                     .foregroundColor(.secondary)
+                    .padding(.top, 2)
             }
         }
+    }
+
+    private func calculateDisplayHeight(for image: NSImage) -> CGFloat {
+        let imageSize = image.size
+        // Estimate based on typical viewport width if we don't have geometry yet
+        let estimatedWidth: CGFloat = maxWidth ?? 700
+        let scale = min(1.0, estimatedWidth / imageSize.width)
+        return imageSize.height * scale
     }
 
     private var loadingView: some View {
         HStack(spacing: 8) {
             ProgressView()
-                .scaleEffect(0.8)
+                .scaleEffect(0.7)
             Text("Loading image...")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
-        .frame(height: 100)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 60)
+        .padding()
+        .background(Color(nsColor: .quaternaryLabelColor).opacity(0.2))
+        .cornerRadius(6)
     }
 
     private var errorView: some View {
         HStack(spacing: 8) {
-            Image(systemName: "photo")
+            Image(systemName: "photo.badge.exclamationmark")
+                .font(.title3)
                 .foregroundColor(.secondary)
-            Text(data.altText.isEmpty ? "Failed to load image" : data.altText)
-                .font(.caption)
-                .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(data.altText.isEmpty ? "Failed to load image" : data.altText)
+                    .font(.callout)
+                    .foregroundColor(.primary)
+                Text(data.source)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(nsColor: .quaternaryLabelColor).opacity(0.3))
-        .cornerRadius(8)
+        .background(Color(nsColor: .quaternaryLabelColor).opacity(0.2))
+        .cornerRadius(6)
     }
 
     private func loadImage() async {
         isLoading = true
-        loadError = nil
+        loadedImage = nil
 
-        // Try as URL first
-        if let url = data.url {
-            do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                if let image = NSImage(data: data) {
-                    await MainActor.run {
-                        self.loadedImage = image
-                        self.isLoading = false
-                    }
-                    return
-                }
-            } catch {
-                // Fall through to try as file path
-            }
-        }
+        let image = await ImageLoader.shared.loadImage(
+            source: data.source,
+            documentURL: documentURL
+        )
 
-        // Try as local file path
-        if let image = NSImage(contentsOfFile: data.source) {
-            await MainActor.run {
-                self.loadedImage = image
-                self.isLoading = false
-            }
-            return
-        }
-
-        // Failed to load
         await MainActor.run {
+            self.loadedImage = image
             self.isLoading = false
         }
     }
 }
 
-/// Fullscreen zoom view for images.
-struct ImageZoomView: View {
+/// Full-window overlay for viewing images at full size.
+struct ImageExpandedOverlay: View {
     let image: NSImage
     let altText: String
     @Binding var isPresented: Bool
     @State private var scale: CGFloat = 1.0
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.9)
-                .ignoresSafeArea()
-                .onTapGesture {
-                    isPresented = false
-                }
+        GeometryReader { geo in
+            ZStack {
+                // Dimmed background
+                Color.black.opacity(0.85)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            isPresented = false
+                        }
+                    }
 
-            ScrollView([.horizontal, .vertical]) {
+                // Image with pan/zoom
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .scaleEffect(scale)
-            }
+                    .offset(offset)
+                    .gesture(
+                        MagnificationGesture()
+                            .onChanged { value in
+                                scale = max(0.5, min(5.0, value))
+                            }
+                    )
+                    .gesture(
+                        DragGesture()
+                            .onChanged { value in
+                                offset = CGSize(
+                                    width: lastOffset.width + value.translation.width,
+                                    height: lastOffset.height + value.translation.height
+                                )
+                            }
+                            .onEnded { _ in
+                                lastOffset = offset
+                            }
+                    )
+                    .frame(maxWidth: geo.size.width * 0.9, maxHeight: geo.size.height * 0.9)
 
-            VStack {
-                HStack {
-                    Spacer()
-                    Button(action: { isPresented = false }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title)
-                            .foregroundColor(.white.opacity(0.8))
+                // Controls overlay
+                VStack {
+                    // Top bar
+                    HStack {
+                        // Reset zoom button
+                        if scale != 1.0 || offset != .zero {
+                            Button {
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    scale = 1.0
+                                    offset = .zero
+                                    lastOffset = .zero
+                                }
+                            } label: {
+                                Image(systemName: "arrow.counterclockwise")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.8))
+                                    .padding(8)
+                                    .background(.ultraThinMaterial)
+                                    .cornerRadius(8)
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        Spacer()
+
+                        Text("Pinch to zoom • Drag to pan")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.6))
+
+                        Spacer()
+
+                        // Close button
+                        Button {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                isPresented = false
+                            }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title2)
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                     .padding()
-                }
-                Spacer()
 
-                if !altText.isEmpty {
-                    Text(altText)
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.8))
-                        .padding(.horizontal)
-                        .padding(.vertical, 8)
-                        .background(.ultraThinMaterial)
-                        .cornerRadius(8)
-                        .padding()
+                    Spacer()
+
+                    // Alt text caption
+                    if !altText.isEmpty {
+                        Text(altText)
+                            .font(.callout)
+                            .foregroundColor(.white.opacity(0.9))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(8)
+                            .padding()
+                    }
                 }
             }
         }
-        .frame(minWidth: 400, minHeight: 300)
         .onExitCommand {
-            isPresented = false
+            withAnimation(.easeOut(duration: 0.2)) {
+                isPresented = false
+            }
         }
     }
 }
 
-#Preview("Loading") {
+// MARK: - Convenience initializer for backward compatibility
+
+extension ImageBlockView {
+    /// Creates an ImageBlockView without document context (for previews/testing).
+    init(data: ImageData) {
+        self.data = data
+        self.documentURL = nil
+        self.maxWidth = nil
+    }
+}
+
+#Preview("Remote Image") {
     ImageBlockView(data: ImageData(
         source: "https://picsum.photos/800/600",
-        altText: "A random image"
+        altText: "A random image from Picsum"
     ))
+    .frame(width: 600)
     .padding()
 }
 
-#Preview("Error") {
+#Preview("Missing Image") {
     ImageBlockView(data: ImageData(
-        source: "invalid-url",
-        altText: "This image won't load"
+        source: "./missing-image.png",
+        altText: "This image doesn't exist"
     ))
+    .frame(width: 600)
     .padding()
 }

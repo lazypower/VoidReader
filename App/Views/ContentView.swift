@@ -63,6 +63,9 @@ struct ContentView: View {
     // Mermaid expand overlay
     @State private var expandedMermaidSource: String?
 
+    // Image expand overlay
+    @State private var expandedImageData: ExpandedImageData?
+
     // File watching and conflict detection
     @State private var fileWatcher: FileWatcher?
     @State private var lastKnownModDate: Date?
@@ -115,9 +118,19 @@ struct ContentView: View {
                     )
                 )
                 .transition(.opacity)
+            } else if let imageData = expandedImageData {
+                ImageExpandedOverlay(
+                    image: imageData.image,
+                    altText: imageData.altText,
+                    isPresented: Binding(
+                        get: { expandedImageData != nil },
+                        set: { if !$0 { expandedImageData = nil } }
+                    )
+                )
+                .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: expandedMermaidSource != nil)
+        .animation(.easeInOut(duration: 0.2), value: expandedMermaidSource != nil || expandedImageData != nil)
         .cheatSheetOnHold(isShowing: $showCheatSheet)
         .onAppear {
             setupDebouncing()
@@ -693,6 +706,7 @@ struct ContentView: View {
                         text: document.text,
                         headings: headings,
                         blocks: renderedBlocks,
+                        documentURL: fileURL,
                         searchText: searchText,
                         caseSensitive: caseSensitive,
                         useRegex: useRegex,
@@ -703,6 +717,7 @@ struct ContentView: View {
                         onTopBlockChange: updateCurrentHeading,
                         onMermaidExpand: { source in expandedMermaidSource = source }
                     )
+                    .environment(\.onImageExpand) { imageData in expandedImageData = imageData }
                     .padding(40)
                     .frame(maxWidth: 720, alignment: .leading)
                     .background(
@@ -800,11 +815,13 @@ struct ContentView: View {
                         text: debouncedText,
                         headings: headings,
                         blocks: renderedBlocks,
+                        documentURL: fileURL,
                         codeFontSize: CGFloat(readerFontSize * 0.875),
                         codeFontFamily: resolvedCodeFontFamily,
                         onTaskToggle: handleTaskToggle,
                         onMermaidExpand: { source in expandedMermaidSource = source }
                     )
+                    .environment(\.onImageExpand) { imageData in expandedImageData = imageData }
                     .padding(40)
                     .frame(maxWidth: 720, alignment: .leading)
                 }

@@ -8,6 +8,7 @@ struct DistractionFreeView: View {
     let isEditMode: Bool
 
     @State private var expandedMermaidSource: String?
+    @State private var expandedImageData: ExpandedImageData?
     @State private var wasFullscreen = false
 
     var body: some View {
@@ -22,6 +23,7 @@ struct DistractionFreeView: View {
                 isEditMode: isEditMode,
                 onMermaidExpand: { source in expandedMermaidSource = source }
             )
+            .environment(\.onImageExpand) { imageData in expandedImageData = imageData }
 
             // Hover controls - has its own state, isolated from content
             DistractionFreeControlsOverlay(onExit: exitDistractionFree)
@@ -46,7 +48,7 @@ struct DistractionFreeView: View {
         .onExitCommand {
             exitDistractionFree()
         }
-        // Mermaid expand overlay
+        // Expand overlays
         .overlay {
             if let source = expandedMermaidSource {
                 MermaidExpandedOverlay(
@@ -57,9 +59,19 @@ struct DistractionFreeView: View {
                     )
                 )
                 .transition(.opacity)
+            } else if let imageData = expandedImageData {
+                ImageExpandedOverlay(
+                    image: imageData.image,
+                    altText: imageData.altText,
+                    isPresented: Binding(
+                        get: { expandedImageData != nil },
+                        set: { if !$0 { expandedImageData = nil } }
+                    )
+                )
+                .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: expandedMermaidSource != nil)
+        .animation(.easeInOut(duration: 0.2), value: expandedMermaidSource != nil || expandedImageData != nil)
     }
 
     private func exitDistractionFree() {

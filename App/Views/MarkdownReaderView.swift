@@ -5,6 +5,7 @@ import VoidReaderCore
 struct MarkdownReaderView: View {
     let text: String
     var blocks: [MarkdownBlock] = []
+    var documentURL: URL? = nil
     var codeFontSize: CGFloat = 13
     var codeFontFamily: String? = nil
     var onTaskToggle: ((Int, Bool) -> Void)?
@@ -39,7 +40,7 @@ struct MarkdownReaderView: View {
             CodeBlockView(data: codeData, fontSize: codeFontSize, fontFamily: codeFontFamily)
 
         case .image(let imageData):
-            ImageBlockView(data: imageData)
+            ImageBlockView(data: imageData, documentURL: documentURL)
 
         case .mermaid(let mermaidData):
             MermaidBlockView(data: mermaidData, onExpand: onMermaidExpand)
@@ -63,6 +64,7 @@ struct MarkdownReaderViewWithAnchors: View {
     let text: String
     let headings: [HeadingInfo]
     var blocks: [MarkdownBlock] = []
+    var documentURL: URL? = nil
     var searchText: String = ""
     var caseSensitive: Bool = false
     var useRegex: Bool = false
@@ -87,6 +89,7 @@ struct MarkdownReaderViewWithAnchors: View {
 
                 BlockView(
                     block: block,
+                    documentURL: documentURL,
                     searchText: searchText,
                     matchRanges: matchInfo.blockMatches[index] ?? [],
                     codeFontSize: codeFontSize,
@@ -197,6 +200,7 @@ struct MarkdownReaderViewWithAnchors: View {
 /// Individual block view.
 private struct BlockView: View {
     let block: MarkdownBlock
+    var documentURL: URL? = nil
     var searchText: String = ""
     var matchRanges: [Range<String.Index>] = []
     var codeFontSize: CGFloat = 13
@@ -225,7 +229,7 @@ private struct BlockView: View {
             CodeBlockView(data: codeData, fontSize: codeFontSize, fontFamily: codeFontFamily)
 
         case .image(let imageData):
-            ImageBlockView(data: imageData)
+            ImageBlockView(data: imageData, documentURL: documentURL)
 
         case .mermaid(let mermaidData):
             MermaidBlockView(data: mermaidData, onExpand: onMermaidExpand)
