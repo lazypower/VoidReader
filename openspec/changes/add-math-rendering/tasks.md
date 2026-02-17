@@ -17,7 +17,7 @@
 - [x] 3.2 Load HTML template with bundled KaTeX
 - [x] 3.3 Inject LaTeX source for rendering
 - [x] 3.4 Handle render completion and sizing
-- [ ] 3.5 Optimize for inline rendering (minimal height)
+- [x] 3.5 Optimize for inline rendering (minimal height) - N/A: inline uses styled text, not WebView
 
 ## 4. Integration
 - [x] 4.1 Create MathBlockView for display math ($$)
