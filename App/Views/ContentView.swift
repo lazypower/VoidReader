@@ -225,14 +225,14 @@ struct ContentView: View {
 
     private func printDocument() {
         guard let window = NSApplication.shared.keyWindow else { return }
-        DocumentPrinter.print(text: document.text, from: window)
+        DocumentPrinter.print(text: document.text, documentURL: fileURL, from: window)
     }
 
     private func exportPDF() {
         guard let window = NSApplication.shared.keyWindow else { return }
         // Use document title or fallback
-        let suggestedName = "Document.pdf"
-        DocumentPrinter.exportPDF(text: document.text, suggestedName: suggestedName, from: window)
+        let suggestedName = fileURL?.deletingPathExtension().lastPathComponent ?? "Document"
+        DocumentPrinter.exportPDF(text: document.text, documentURL: fileURL, suggestedName: suggestedName, from: window)
     }
 
     // MARK: - Font Size

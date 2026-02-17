@@ -9,14 +9,16 @@ final class PrintableMarkdownView: NSView {
     private let pageSize: NSSize
     private let margins: NSEdgeInsets
     private let mermaidImages: [String: NSImage]
+    private let documentImages: [String: NSImage]
 
     // Calculated layout
     private var renderedBlocks: [RenderedBlock] = []
     private var totalHeight: CGFloat = 0
 
-    init(text: String, mermaidImages: [String: NSImage] = [:], pageSize: NSSize = NSSize(width: 612, height: 792), margins: NSEdgeInsets = NSEdgeInsets(top: 72, left: 72, bottom: 72, right: 72)) {
+    init(text: String, mermaidImages: [String: NSImage] = [:], documentImages: [String: NSImage] = [:], pageSize: NSSize = NSSize(width: 612, height: 792), margins: NSEdgeInsets = NSEdgeInsets(top: 72, left: 72, bottom: 72, right: 72)) {
         self.text = text
         self.mermaidImages = mermaidImages
+        self.documentImages = documentImages
         self.pageSize = pageSize
         self.margins = margins
         super.init(frame: .zero)
@@ -113,11 +115,22 @@ final class PrintableMarkdownView: NSView {
             )
 
         case .image(let data):
-            // For print, just show placeholder text for images
-            return RenderedBlock(
-                type: .imagePlaceholder(data.altText),
-                frame: NSRect(x: xOffset, y: yOffset, width: contentWidth, height: 24)
-            )
+            // Use pre-loaded image if available
+            if let image = documentImages[data.source] {
+                let aspectRatio = image.size.width / image.size.height
+                let imageWidth = min(contentWidth, image.size.width)
+                let imageHeight = imageWidth / aspectRatio
+                return RenderedBlock(
+                    type: .documentImage(image),
+                    frame: NSRect(x: xOffset, y: yOffset, width: imageWidth, height: imageHeight)
+                )
+            } else {
+                // Fallback to placeholder
+                return RenderedBlock(
+                    type: .imagePlaceholder(data.altText),
+                    frame: NSRect(x: xOffset, y: yOffset, width: contentWidth, height: 24)
+                )
+            }
 
         case .mermaid(let data):
             // Use pre-rendered image if available
@@ -192,6 +205,10 @@ final class PrintableMarkdownView: NSView {
 
         case .taskList(let items):
             drawTaskList(items, in: rendered.frame)
+
+        case .documentImage(let image):
+            // Draw the pre-loaded document image
+            image.draw(in: rendered.frame, from: .zero, operation: .sourceOver, fraction: 1.0)
 
         case .imagePlaceholder(let altText):
             let attrs: [NSAttributedString.Key: Any] = [
@@ -375,6 +392,7 @@ private struct RenderedBlock {
         case codeBlock(NSAttributedString)
         case table(TableData)
         case taskList([TaskItem])
+        case documentImage(NSImage)
         case imagePlaceholder(String)
         case mermaidImage(NSImage)
         case mermaidPlaceholder
@@ -401,27 +419,52 @@ enum DocumentPrinter {
         }
     }
 
-    /// Prints the given markdown text.
-    static func print(text: String, from window: NSWindow?) {
-        // Extract mermaid sources and render them
-        let mermaidSources = extractMermaidSources(from: text)
+    /// Extracts image source strings from markdown text.
+    private static func extractImageSources(from text: String) -> [String] {
+        let blocks = BlockRenderer.render(text)
+        return blocks.compactMap { block in
+            if case .image(let data) = block {
+                return data.source
+            }
+            return nil
+        }
+    }
 
-        if mermaidSources.isEmpty {
-            // No mermaid diagrams - print directly
-            performPrint(text: text, mermaidImages: [:], window: window)
+    /// Pre-loads all images for printing.
+    private static func loadImages(sources: [String], documentURL: URL?) async -> [String: NSImage] {
+        var results: [String: NSImage] = [:]
+        for source in sources {
+            if let image = await ImageLoader.shared.loadImage(source: source, documentURL: documentURL) {
+                results[source] = image
+            }
+        }
+        return results
+    }
+
+    /// Prints the given markdown text.
+    static func print(text: String, documentURL: URL?, from window: NSWindow?) {
+        let mermaidSources = extractMermaidSources(from: text)
+        let imageSources = extractImageSources(from: text)
+
+        if mermaidSources.isEmpty && imageSources.isEmpty {
+            // No special content - print directly
+            performPrint(text: text, mermaidImages: [:], documentImages: [:], window: window)
         } else {
-            // Pre-render mermaid diagrams
+            // Pre-render mermaid diagrams and load images
             Task {
-                let images = await MermaidImageRenderer.renderAll(sources: mermaidSources)
+                async let mermaidImages = MermaidImageRenderer.renderAll(sources: mermaidSources)
+                async let docImages = loadImages(sources: imageSources, documentURL: documentURL)
+
+                let (mermaids, images) = await (mermaidImages, docImages)
                 await MainActor.run {
-                    performPrint(text: text, mermaidImages: images, window: window)
+                    performPrint(text: text, mermaidImages: mermaids, documentImages: images, window: window)
                 }
             }
         }
     }
 
-    private static func performPrint(text: String, mermaidImages: [String: NSImage], window: NSWindow?) {
-        let printView = PrintableMarkdownView(text: text, mermaidImages: mermaidImages)
+    private static func performPrint(text: String, mermaidImages: [String: NSImage], documentImages: [String: NSImage], window: NSWindow?) {
+        let printView = PrintableMarkdownView(text: text, mermaidImages: mermaidImages, documentImages: documentImages)
 
         let printInfo = NSPrintInfo.shared.copy() as! NSPrintInfo
         printInfo.horizontalPagination = .fit
@@ -445,7 +488,7 @@ enum DocumentPrinter {
     }
 
     /// Exports the markdown text to PDF, prompting for save location.
-    static func exportPDF(text: String, suggestedName: String, from window: NSWindow?) {
+    static func exportPDF(text: String, documentURL: URL?, suggestedName: String, from window: NSWindow?) {
         let savePanel = NSSavePanel()
         savePanel.allowedContentTypes = [.pdf]
         savePanel.nameFieldStringValue = suggestedName.replacingOccurrences(of: ".md", with: ".pdf")
@@ -454,18 +497,21 @@ enum DocumentPrinter {
         let handler: (NSApplication.ModalResponse) -> Void = { response in
             guard response == .OK, let url = savePanel.url else { return }
 
-            // Extract mermaid sources and render them
             let mermaidSources = extractMermaidSources(from: text)
+            let imageSources = extractImageSources(from: text)
 
-            if mermaidSources.isEmpty {
-                // No mermaid diagrams - export directly
-                performExport(text: text, mermaidImages: [:], url: url)
+            if mermaidSources.isEmpty && imageSources.isEmpty {
+                // No special content - export directly
+                performExport(text: text, mermaidImages: [:], documentImages: [:], url: url)
             } else {
-                // Pre-render mermaid diagrams
+                // Pre-render mermaid diagrams and load images
                 Task {
-                    let images = await MermaidImageRenderer.renderAll(sources: mermaidSources)
+                    async let mermaidImages = MermaidImageRenderer.renderAll(sources: mermaidSources)
+                    async let docImages = loadImages(sources: imageSources, documentURL: documentURL)
+
+                    let (mermaids, images) = await (mermaidImages, docImages)
                     await MainActor.run {
-                        performExport(text: text, mermaidImages: images, url: url)
+                        performExport(text: text, mermaidImages: mermaids, documentImages: images, url: url)
                     }
                 }
             }
@@ -478,8 +524,8 @@ enum DocumentPrinter {
         }
     }
 
-    private static func performExport(text: String, mermaidImages: [String: NSImage], url: URL) {
-        let printView = PrintableMarkdownView(text: text, mermaidImages: mermaidImages)
+    private static func performExport(text: String, mermaidImages: [String: NSImage], documentImages: [String: NSImage], url: URL) {
+        let printView = PrintableMarkdownView(text: text, mermaidImages: mermaidImages, documentImages: documentImages)
 
         // Configure print info for PDF output
         let printInfo = NSPrintInfo()
