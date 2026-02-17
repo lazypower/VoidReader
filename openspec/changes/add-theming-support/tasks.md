@@ -43,6 +43,7 @@
 - [x] 5.2 For "System" theme: continue using NSColor semantic colors
 - [x] 5.3 For Catppuccin: apply palette colors to headings, links, code, etc.
 - [x] 5.4 Verify reader view respects selected theme coherently
+- [x] 5.5 Add "Apply Theme to Reader" toggle (default OFF) - editor-only theming option
 
 ## 6. Runtime Theme Loading
 - [x] 6.1 Create ThemeLoader to read JSON theme files from disk
