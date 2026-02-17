@@ -73,6 +73,7 @@ struct MarkdownReaderViewWithAnchors: View {
     var codeFontFamily: String? = nil
     var onTaskToggle: ((Int, Bool) -> Void)?
     var onTopBlockChange: ((Int) -> Void)?
+    var onScrollProgress: ((Int) -> Void)?  // Reports percent read (0-100)
     var onMermaidExpand: ((String) -> Void)?
 
     var body: some View {
@@ -117,6 +118,15 @@ struct MarkdownReaderViewWithAnchors: View {
 
             if let blockIndex = topBlock?.key {
                 onTopBlockChange?(blockIndex)
+
+                // Calculate scroll progress as percentage of blocks read
+                let totalBlocks = positions.count
+                if totalBlocks > 1 {
+                    let percent = (blockIndex * 100) / (totalBlocks - 1)
+                    onScrollProgress?(min(100, max(0, percent)))
+                } else {
+                    onScrollProgress?(0)
+                }
             }
         }
     }

@@ -6,6 +6,7 @@ struct StatusBarView: View {
     let stats: DocumentStats
     var selectionStats: DocumentStats?
     var warningCount: Int = 0
+    var percentRead: Int?
 
     var body: some View {
         HStack(spacing: 16) {
@@ -32,6 +33,17 @@ struct StatusBarView: View {
                 icon: "clock",
                 value: displayStats.readingTimeFormatted
             )
+
+            // Percent read (reader mode only)
+            if let percent = percentRead {
+                Divider()
+                    .frame(height: 12)
+
+                statItem(
+                    icon: "book",
+                    value: "\(percent)%"
+                )
+            }
 
             Spacer()
 

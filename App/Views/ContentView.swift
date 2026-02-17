@@ -54,6 +54,8 @@ struct ContentView: View {
     @State private var scrollProxy: ScrollViewProxy?
     @State private var savedScrollBlockIndex: Int?
     @State private var currentTopBlockIndex: Int = 0
+    @State private var displayedPercentRead: Int = 0
+    @State private var percentUpdateTask: Task<Void, Never>?
 
     // Find bar
     @State private var showFindBar = false
@@ -387,8 +389,12 @@ struct ContentView: View {
 
                 // Status bar
                 if showStatusBar {
-                    StatusBarView(stats: documentStats, warningCount: lintWarnings.count)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    StatusBarView(
+                        stats: documentStats,
+                        warningCount: lintWarnings.count,
+                        percentRead: isEditMode ? nil : displayedPercentRead
+                    )
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
             .animation(.easeInOut(duration: 0.15), value: showFindBar)
@@ -656,6 +662,7 @@ struct ContentView: View {
                 updateLintWarnings(for: text)
             }
             .store(in: &cancellables)
+
     }
 
     // MARK: - File Watching
@@ -739,6 +746,15 @@ struct ContentView: View {
                         codeFontFamily: resolvedCodeFontFamily,
                         onTaskToggle: handleTaskToggle,
                         onTopBlockChange: updateCurrentHeading,
+                        onScrollProgress: { percent in
+                            // Debounce to update on scroll stop
+                            percentUpdateTask?.cancel()
+                            percentUpdateTask = Task {
+                                try? await Task.sleep(nanoseconds: 150_000_000)
+                                guard !Task.isCancelled else { return }
+                                displayedPercentRead = percent
+                            }
+                        },
                         onMermaidExpand: { source in expandedMermaidSource = source }
                     )
                     .environment(\.onImageExpand) { imageData in expandedImageData = imageData }
@@ -751,14 +767,14 @@ struct ContentView: View {
                                 .onAppear {
                                     contentHeight = geo.size.height
                                 }
+                                .onChange(of: geo.size.height) { _, newHeight in
+                                    contentHeight = newHeight
+                                }
                         }
                     )
                 }
             }
             .coordinateSpace(name: "reader-scroll")
-            .onPreferenceChange(ScrollOffsetPreferenceKey.self) { offset in
-                scrollOffset = -offset
-            }
             .onAppear {
                 scrollProxy = proxy
                 restoreScrollPosition(proxy: proxy)
@@ -898,7 +914,7 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Scroll Position Tracking
+/// MARK: - Scroll Position Tracking
 
 private struct ScrollOffsetPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
