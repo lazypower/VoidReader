@@ -20,7 +20,7 @@
 ## 4. UTType Registration
 - [x] 4.1 Add UTType declarations to Info.plist
 - [x] 4.2 Register app as handler for markdown files
-- [ ] 4.3 Configure document type icons (optional)
+- [x] 4.3 Configure document type icons
 
 ## 5. Context-Aware Launch Mode
 - [x] 5.1 Detect if launched with file argument
