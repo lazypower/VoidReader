@@ -261,6 +261,10 @@ struct ContentView: View {
             style.secondaryColor = palette.subtext0
             style.linkColor = palette.blue
             style.codeBackground = palette.surface0.opacity(0.5)
+            style.headingColor = palette.mauve
+            style.listMarkerColor = palette.teal
+            style.blockquoteColor = palette.lavender
+            style.mathColor = palette.green
         }
         // For System theme, leave colors as nil to use semantic macOS colors
 

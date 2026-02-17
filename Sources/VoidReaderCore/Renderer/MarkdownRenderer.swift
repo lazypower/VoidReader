@@ -34,6 +34,9 @@ public struct MarkdownRenderer {
         public var linkColor: Color? = nil          // nil → Color.accentColor
         public var codeBackground: Color? = nil     // nil → quaternaryLabelColor
         public var mathColor: Color? = nil          // nil → purple accent for math
+        public var headingColor: Color? = nil       // nil → textColor
+        public var listMarkerColor: Color? = nil    // nil → secondaryColor
+        public var blockquoteColor: Color? = nil    // nil → secondaryColor
 
         public init() {}
 
@@ -60,6 +63,21 @@ public struct MarkdownRenderer {
         /// Resolved math color (semantic or themed)
         public var resolvedMathColor: Color {
             mathColor ?? Color.purple
+        }
+
+        /// Resolved heading color (falls back to text color)
+        public var resolvedHeadingColor: Color {
+            headingColor ?? resolvedTextColor
+        }
+
+        /// Resolved list marker color (falls back to secondary color)
+        public var resolvedListMarkerColor: Color {
+            listMarkerColor ?? resolvedSecondaryColor
+        }
+
+        /// Resolved blockquote color (falls back to secondary color)
+        public var resolvedBlockquoteColor: Color {
+            blockquoteColor ?? resolvedSecondaryColor
         }
 
         /// Creates a font with the configured family

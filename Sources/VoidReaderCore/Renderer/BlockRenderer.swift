@@ -97,6 +97,7 @@ struct BlockWalker: MarkupWalker {
     private var isItalic = false
     private var isStrikethrough = false
     private var headingLevel: Int? = nil
+    private var inBlockquote = false
     private var listDepth: Int = 0
     private var orderedListCounters: [Int] = []
 
@@ -206,11 +207,13 @@ struct BlockWalker: MarkupWalker {
 
         var marker = AttributedString("│ ")
         marker.font = style.makeFont(size: style.bodySize).italic()
-        marker.foregroundColor = style.resolvedSecondaryColor
+        marker.foregroundColor = style.resolvedBlockquoteColor
         textBuffer += marker
 
         let savedItalic = isItalic
+        let savedInBlockquote = inBlockquote
         isItalic = true
+        inBlockquote = true
 
         for child in blockQuote.children {
             if let para = child as? Paragraph {
@@ -223,6 +226,7 @@ struct BlockWalker: MarkupWalker {
         }
 
         isItalic = savedItalic
+        inBlockquote = savedInBlockquote
     }
 
     mutating func visitTable(_ table: Markdown.Table) {
@@ -338,7 +342,7 @@ struct BlockWalker: MarkupWalker {
 
         var markerString = AttributedString("\(indent)\(marker) ")
         markerString.font = currentFont()
-        markerString.foregroundColor = style.resolvedSecondaryColor
+        markerString.foregroundColor = style.resolvedListMarkerColor
         textBuffer += markerString
 
         for child in item.children {
@@ -364,6 +368,15 @@ struct BlockWalker: MarkupWalker {
     mutating func visitText(_ text: Markdown.Text) {
         let source = text.string
 
+        // Determine text color based on context
+        let textColor: Color = if headingLevel != nil {
+            style.resolvedHeadingColor
+        } else if inBlockquote {
+            style.resolvedBlockquoteColor
+        } else {
+            style.resolvedTextColor
+        }
+
         // Check for inline math
         let mathMatches = InlineMathParser.extract(from: source)
 
@@ -371,7 +384,7 @@ struct BlockWalker: MarkupWalker {
             // No math - render as plain text
             var textString = AttributedString(source)
             textString.font = currentFont()
-            textString.foregroundColor = style.resolvedTextColor
+            textString.foregroundColor = textColor
             if isStrikethrough {
                 textString.strikethroughStyle = .single
             }
@@ -386,7 +399,7 @@ struct BlockWalker: MarkupWalker {
                     let beforeText = String(source[currentIndex..<match.range.lowerBound])
                     var beforeString = AttributedString(beforeText)
                     beforeString.font = currentFont()
-                    beforeString.foregroundColor = style.resolvedTextColor
+                    beforeString.foregroundColor = textColor
                     if isStrikethrough {
                         beforeString.strikethroughStyle = .single
                     }
@@ -408,7 +421,7 @@ struct BlockWalker: MarkupWalker {
                 let afterText = String(source[currentIndex...])
                 var afterString = AttributedString(afterText)
                 afterString.font = currentFont()
-                afterString.foregroundColor = style.resolvedTextColor
+                afterString.foregroundColor = textColor
                 if isStrikethrough {
                     afterString.strikethroughStyle = .single
                 }

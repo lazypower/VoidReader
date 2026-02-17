@@ -39,9 +39,9 @@
 - [x] 4.7 Verify diagrams re-render on theme or appearance change
 
 ## 5. Reader View Theme Integration
-- [ ] 5.1 Update BlockRenderer to accept theme palette
+- [x] 5.1 Update BlockRenderer to accept theme palette
 - [x] 5.2 For "System" theme: continue using NSColor semantic colors
-- [ ] 5.3 For Catppuccin: apply palette colors to headings, links, code, etc.
+- [x] 5.3 For Catppuccin: apply palette colors to headings, links, code, etc.
 - [x] 5.4 Verify reader view respects selected theme coherently
 
 ## 6. Runtime Theme Loading
