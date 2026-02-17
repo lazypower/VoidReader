@@ -9,6 +9,7 @@ struct SettingsView: View {
     @AppStorage("readerFontFamily") private var readerFontFamily: String = ""
     @AppStorage("readerFontSize") private var readerFontSize: Double = 16.0
     @AppStorage("codeFontFamily") private var codeFontFamily: String = ""
+    @AppStorage("fullWidthReader") private var fullWidthReader: Bool = false
 
     // Formatting settings
     @AppStorage("formatOnSave") private var formatOnSave: Bool = false
@@ -64,6 +65,9 @@ struct SettingsView: View {
                             .monospacedDigit()
                     }
                 }
+
+                Toggle("Full Width Layout", isOn: $fullWidthReader)
+                    .help("Expand content to fill the window instead of a centered column")
             } header: {
                 Text("Reader")
             }

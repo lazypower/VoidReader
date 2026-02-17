@@ -14,6 +14,7 @@ struct ContentView: View {
     @AppStorage("readerFontSize") private var readerFontSize: Double = 16.0
     @AppStorage("readerFontFamily") private var readerFontFamily: String = ""
     @AppStorage("codeFontFamily") private var codeFontFamily: String = ""
+    @AppStorage("fullWidthReader") private var fullWidthReader: Bool = false
     @AppStorage("selectedThemeID") private var selectedThemeID: String = "system"
     @AppStorage("appearanceOverride") private var appearanceOverride: String = "system"
 
@@ -758,8 +759,8 @@ struct ContentView: View {
                         onMermaidExpand: { source in expandedMermaidSource = source }
                     )
                     .environment(\.onImageExpand) { imageData in expandedImageData = imageData }
-                    .padding(40)
-                    .frame(maxWidth: 720, alignment: .leading)
+                    .padding(fullWidthReader ? 24 : 40)
+                    .frame(maxWidth: fullWidthReader ? .infinity : 720, alignment: .leading)
                     .background(
                         GeometryReader { geo in
                             Color.clear
@@ -895,8 +896,8 @@ struct ContentView: View {
                         onMermaidExpand: { source in expandedMermaidSource = source }
                     )
                     .environment(\.onImageExpand) { imageData in expandedImageData = imageData }
-                    .padding(40)
-                    .frame(maxWidth: 720, alignment: .leading)
+                    .padding(fullWidthReader ? 24 : 40)
+                    .frame(maxWidth: fullWidthReader ? .infinity : 720, alignment: .leading)
                 }
                 .onChange(of: scrollToHeadingIndex) { _, newIndex in
                     if let index = newIndex {
