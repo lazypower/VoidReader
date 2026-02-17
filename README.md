@@ -56,6 +56,7 @@ Grab the latest DMG from [Releases](https://github.com/lazypower/void-reader/rel
 Double-click. Drag to Applications. Done.
 
 ### Build from Source
+
 ```bash
 # Install dependencies
 brew install xcodegen swiftlint swiftformat
@@ -81,14 +82,14 @@ open -a VoidReader document.md
 
 ### Keyboard Shortcuts
 
-| Action | Shortcut |
-|--------|----------|
-| Toggle Edit Mode | Cmd + E |
-| Toggle Sidebar | Cmd + Shift + S |
+| Action           | Shortcut        |
+| ---------------- | --------------- |
+| Toggle Edit Mode | Cmd + E         |
+| Toggle Sidebar   | Cmd + Shift + S |
 | Distraction-Free | Cmd + Shift + F |
-| Find | Cmd + F |
-| Find & Replace | Cmd + H |
-| Print | Cmd + P |
+| Find             | Cmd + F         |
+| Find & Replace   | Cmd + H         |
+| Print            | Cmd + P         |
 
 ## Development
 
