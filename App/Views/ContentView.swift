@@ -57,6 +57,7 @@ struct ContentView: View {
     @State private var savedScrollBlockIndex: Int?
     @State private var currentTopBlockIndex: Int = 0
     @State private var displayedPercentRead: Int = 0
+    @State private var scrollOffsetForPercent: CGFloat = 0
     @State private var percentUpdateTask: Task<Void, Never>?
 
     // Find bar
@@ -501,6 +502,7 @@ struct ContentView: View {
         if text.count < 50_000 {
             DebugLog.log(.rendering, "updateRenderedBlocks: sync path (\(text.count) chars)")
             renderedBlocks = BlockRenderer.render(text, style: renderStyle)
+            onBlocksChanged()
             return
         }
 
@@ -520,6 +522,7 @@ struct ContentView: View {
             BlockRenderer.render(firstChunk, style: style)
         }
         renderedBlocks = initialBlocks
+        onBlocksChanged()
         DebugLog.log(.rendering, "  → Initial \(initialBlocks.count) blocks shown immediately")
 
         // If we rendered everything in the first chunk, we're done
@@ -545,6 +548,7 @@ struct ContentView: View {
                 DebugLog.log(.rendering, "Appending \(moreBlocks.count) blocks...")
                 let assignStart = CFAbsoluteTimeGetCurrent()
                 renderedBlocks = initialBlocks + moreBlocks
+                onBlocksChanged()
                 let assignTime = (CFAbsoluteTimeGetCurrent() - assignStart) * 1000
                 DebugLog.log(.rendering, "Block append took \(String(format: "%.2f", assignTime))ms")
                 DebugLog.log(.rendering, "  → Total \(renderedBlocks.count) blocks")
@@ -873,8 +877,23 @@ struct ContentView: View {
                         .padding(fullWidthReader ? 24 : 40)
                         .frame(maxWidth: fullWidthReader ? .infinity : 720, alignment: .leading)
                     }
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(
+                                key: ReaderScrollOffsetKey.self,
+                                value: geo.frame(in: .global).minY
+                            )
+                        }
+                    )
                 }
                 .coordinateSpace(name: "reader-scroll")
+                .onPreferenceChange(ReaderScrollOffsetKey.self) { minY in
+                    // minY decreases as we scroll down (content moves up)
+                    // Initial value is some positive number (distance from top of screen)
+                    // As we scroll, it becomes negative
+                    let scrollOffset = max(0, -minY + 200)  // Add offset for initial padding
+                    updateScrollPercent(offset: scrollOffset)
+                }
 
                 // Loading indicator for large documents
                 if isRendering {
@@ -954,12 +973,50 @@ struct ContentView: View {
     }
 
     private func handleScrollProgress(_ percent: Int) {
+        DebugLog.log(.scroll, "ContentView.handleScrollProgress: \(percent)%, current displayedPercentRead=\(displayedPercentRead)")
         // Debounce to update on scroll stop
         percentUpdateTask?.cancel()
         percentUpdateTask = Task {
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard !Task.isCancelled else { return }
+            DebugLog.log(.scroll, "  → setting displayedPercentRead=\(percent)")
             displayedPercentRead = percent
+        }
+    }
+
+    /// Update scroll percentage based on scroll offset - debounced to avoid jitter
+    private func updateScrollPercent(offset: CGFloat) {
+        // Store offset for later recalculation when blocks change
+        scrollOffsetForPercent = offset
+
+        // Skip if in edit mode
+        guard !isEditMode else { return }
+
+        // If no blocks yet, just show 0%
+        guard renderedBlocks.count > 0 else {
+            if displayedPercentRead != 0 {
+                displayedPercentRead = 0
+            }
+            return
+        }
+
+        // Estimate total content height
+        let estimatedBlockHeight: CGFloat = 60
+        let totalHeight = CGFloat(renderedBlocks.count) * estimatedBlockHeight
+
+        // Calculate percent (0-100)
+        let percent = Int(min(100, max(0, (offset / max(1, totalHeight)) * 100)))
+
+        // Only update if changed - this check plus @State debouncing prevents jitter
+        if percent != displayedPercentRead {
+            displayedPercentRead = percent
+        }
+    }
+
+    /// Recalculate scroll percent when blocks change
+    private func onBlocksChanged() {
+        if !isEditMode && renderedBlocks.count > 0 {
+            updateScrollPercent(offset: scrollOffsetForPercent)
         }
     }
 
@@ -1052,7 +1109,13 @@ struct ContentView: View {
     }
 }
 
-// Note: ScrollOffsetPreferenceKey moved to MarkdownReaderView.swift
+/// Preference key for tracking scroll position in reader view
+private struct ReaderScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
 
 #Preview {
     ContentView(document: .constant(MarkdownDocument(text: """

@@ -60,12 +60,14 @@ struct ScrollPositionTracker: View {
     let onPositionUpdate: (Int, Int) -> Void
 
     @State private var lastReportedPercent: Int = -1
+    @State private var hasReportedInitial: Bool = false
 
     var body: some View {
         GeometryReader { geo in
             Color.clear
                 .onAppear {
-                    updatePosition(from: geo)
+                    DebugLog.log(.scroll, "ScrollTracker onAppear, blockCount=\(blockCount)")
+                    reportInitialPosition(from: geo)
                 }
                 // Use preference key for efficient position tracking
                 .preference(
@@ -80,19 +82,25 @@ struct ScrollPositionTracker: View {
         }
     }
 
-    private func updatePosition(from geo: GeometryProxy) {
+    private func reportInitialPosition(from geo: GeometryProxy) {
+        guard !hasReportedInitial else { return }
+        hasReportedInitial = true
         let offset = -geo.frame(in: .named(coordinateSpace)).minY
-        calculateAndReport(offset: offset)
+        DebugLog.log(.scroll, "Initial offset=\(offset)")
+        calculateAndReport(offset: offset, force: true)
     }
 
-    private func calculateAndReport(offset: CGFloat) {
+    private func calculateAndReport(offset: CGFloat, force: Bool = false) {
+        guard blockCount > 0 else { return }
+
         let estimatedBlockHeight: CGFloat = 60
         let estimatedIndex = max(0, min(blockCount - 1, Int(offset / estimatedBlockHeight)))
         let percent = blockCount > 1 ? (estimatedIndex * 100) / (blockCount - 1) : 0
         let clampedPercent = min(100, max(0, percent))
 
-        // Only report if percent changed (avoids redundant updates)
-        if clampedPercent != lastReportedPercent {
+        // Only report if percent changed (avoids redundant updates), or forced
+        if force || clampedPercent != lastReportedPercent {
+            DebugLog.log(.scroll, "Reporting percent=\(clampedPercent)% (block \(estimatedIndex)/\(blockCount))")
             lastReportedPercent = clampedPercent
             onPositionUpdate(estimatedIndex, clampedPercent)
         }
@@ -158,12 +166,14 @@ struct MarkdownReaderViewWithAnchors: View {
     @ViewBuilder
     private func directContent(blocks renderBlocks: [MarkdownBlock]) -> some View {
         LazyVStack(alignment: .leading, spacing: 16) {
+            // Scroll tracker at top of content
+            scrollTracker
+
             ForEach(renderBlocks.indices, id: \.self) { index in
                 blockContent(at: index, in: renderBlocks)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(scrollTracker)
         .onAppear { setupState(blocks: renderBlocks) }
         .onChange(of: renderBlocks.count) { _, newCount in blockCount = newCount }
         .onChange(of: searchText) { _, _ in updateMatchInfoIfNeeded(blocks: renderBlocks) }
@@ -177,6 +187,9 @@ struct MarkdownReaderViewWithAnchors: View {
         let chunkCount = (renderBlocks.count + Self.chunkSize - 1) / Self.chunkSize
 
         LazyVStack(alignment: .leading, spacing: 0) {
+            // Scroll tracker at top of content
+            scrollTracker
+
             ForEach(0..<chunkCount, id: \.self) { chunkIndex in
                 let startIdx = chunkIndex * Self.chunkSize
                 let endIdx = min(startIdx + Self.chunkSize, renderBlocks.count)
@@ -199,7 +212,6 @@ struct MarkdownReaderViewWithAnchors: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(scrollTracker)
         .onAppear { setupState(blocks: renderBlocks) }
         .onChange(of: renderBlocks.count) { _, newCount in blockCount = newCount }
         .onChange(of: searchText) { _, _ in updateMatchInfoIfNeeded(blocks: renderBlocks) }
@@ -244,13 +256,20 @@ struct MarkdownReaderViewWithAnchors: View {
                 blockCount: blockCount,
                 onPositionUpdate: handleScrollUpdate
             )
+            // Force recreation when blockCount changes to trigger onAppear
+            .id("scroll-tracker-\(blockCount)")
         }
     }
 
     /// Handle debounced scroll position update
     private func handleScrollUpdate(blockIndex: Int, percent: Int) {
-        guard blockIndex != lastReportedBlockIndex else { return }
+        DebugLog.log(.scroll, "handleScrollUpdate: blockIndex=\(blockIndex), percent=\(percent), lastReported=\(lastReportedBlockIndex)")
+        guard blockIndex != lastReportedBlockIndex else {
+            DebugLog.log(.scroll, "  → skipped (same block)")
+            return
+        }
         lastReportedBlockIndex = blockIndex
+        DebugLog.log(.scroll, "  → calling onScrollProgress with \(percent)%")
         onTopBlockChange?(blockIndex)
         onScrollProgress?(percent)
     }
