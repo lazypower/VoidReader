@@ -502,7 +502,6 @@ struct ContentView: View {
         if text.count < 50_000 {
             DebugLog.log(.rendering, "updateRenderedBlocks: sync path (\(text.count) chars)")
             renderedBlocks = BlockRenderer.render(text, style: renderStyle)
-            onBlocksChanged()
             return
         }
 
@@ -522,7 +521,6 @@ struct ContentView: View {
             BlockRenderer.render(firstChunk, style: style)
         }
         renderedBlocks = initialBlocks
-        onBlocksChanged()
         DebugLog.log(.rendering, "  → Initial \(initialBlocks.count) blocks shown immediately")
 
         // If we rendered everything in the first chunk, we're done
@@ -548,7 +546,6 @@ struct ContentView: View {
                 DebugLog.log(.rendering, "Appending \(moreBlocks.count) blocks...")
                 let assignStart = CFAbsoluteTimeGetCurrent()
                 renderedBlocks = initialBlocks + moreBlocks
-                onBlocksChanged()
                 let assignTime = (CFAbsoluteTimeGetCurrent() - assignStart) * 1000
                 DebugLog.log(.rendering, "Block append took \(String(format: "%.2f", assignTime))ms")
                 DebugLog.log(.rendering, "  → Total \(renderedBlocks.count) blocks")
@@ -853,6 +850,18 @@ struct ContentView: View {
         ScrollViewReader { proxy in
             ZStack {
                 ScrollView {
+                    // Scroll position tracker - MUST be outside LazyVStack to fire continuously
+                    GeometryReader { geo in
+                        Color.clear
+                            .onChange(of: geo.frame(in: .named("reader-scroll")).minY) { _, newY in
+                                updateScrollPercent(offset: -newY)
+                            }
+                            .onAppear {
+                                updateScrollPercent(offset: -geo.frame(in: .named("reader-scroll")).minY)
+                            }
+                    }
+                    .frame(height: 0)
+
                     VStack(spacing: 0) {
                         // Anchor at top for scroll restoration
                         Color.clear.frame(height: 1).id("top")
@@ -877,22 +886,11 @@ struct ContentView: View {
                         .padding(fullWidthReader ? 24 : 40)
                         .frame(maxWidth: fullWidthReader ? .infinity : 720, alignment: .leading)
                     }
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear.preference(
-                                key: ReaderScrollOffsetKey.self,
-                                value: geo.frame(in: .global).minY
-                            )
-                        }
-                    )
                 }
                 .coordinateSpace(name: "reader-scroll")
-                .onPreferenceChange(ReaderScrollOffsetKey.self) { minY in
-                    // minY decreases as we scroll down (content moves up)
-                    // Initial value is some positive number (distance from top of screen)
-                    // As we scroll, it becomes negative
-                    let scrollOffset = max(0, -minY + 200)  // Add offset for initial padding
-                    updateScrollPercent(offset: scrollOffset)
+                .onChange(of: renderedBlocks.count) { _, _ in
+                    // Recompute progress when blocks change (progressive rendering)
+                    updateScrollPercent(offset: scrollOffsetForPercent)
                 }
 
                 // Loading indicator for large documents
@@ -984,7 +982,7 @@ struct ContentView: View {
         }
     }
 
-    /// Update scroll percentage based on scroll offset - debounced to avoid jitter
+    /// Update scroll percentage based on scroll offset
     private func updateScrollPercent(offset: CGFloat) {
         // Store offset for later recalculation when blocks change
         scrollOffsetForPercent = offset
@@ -1010,13 +1008,6 @@ struct ContentView: View {
         // Only update if changed - this check plus @State debouncing prevents jitter
         if percent != displayedPercentRead {
             displayedPercentRead = percent
-        }
-    }
-
-    /// Recalculate scroll percent when blocks change
-    private func onBlocksChanged() {
-        if !isEditMode && renderedBlocks.count > 0 {
-            updateScrollPercent(offset: scrollOffsetForPercent)
         }
     }
 

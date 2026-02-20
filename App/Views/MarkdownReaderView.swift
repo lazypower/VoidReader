@@ -66,7 +66,6 @@ struct ScrollPositionTracker: View {
         GeometryReader { geo in
             Color.clear
                 .onAppear {
-                    DebugLog.log(.scroll, "ScrollTracker onAppear, blockCount=\(blockCount)")
                     reportInitialPosition(from: geo)
                 }
                 // Use preference key for efficient position tracking
@@ -86,7 +85,6 @@ struct ScrollPositionTracker: View {
         guard !hasReportedInitial else { return }
         hasReportedInitial = true
         let offset = -geo.frame(in: .named(coordinateSpace)).minY
-        DebugLog.log(.scroll, "Initial offset=\(offset)")
         calculateAndReport(offset: offset, force: true)
     }
 
@@ -100,7 +98,6 @@ struct ScrollPositionTracker: View {
 
         // Only report if percent changed (avoids redundant updates), or forced
         if force || clampedPercent != lastReportedPercent {
-            DebugLog.log(.scroll, "Reporting percent=\(clampedPercent)% (block \(estimatedIndex)/\(blockCount))")
             lastReportedPercent = clampedPercent
             onPositionUpdate(estimatedIndex, clampedPercent)
         }
@@ -261,17 +258,12 @@ struct MarkdownReaderViewWithAnchors: View {
         }
     }
 
-    /// Handle debounced scroll position update
+    /// Handle scroll position update for outline sync
     private func handleScrollUpdate(blockIndex: Int, percent: Int) {
-        DebugLog.log(.scroll, "handleScrollUpdate: blockIndex=\(blockIndex), percent=\(percent), lastReported=\(lastReportedBlockIndex)")
-        guard blockIndex != lastReportedBlockIndex else {
-            DebugLog.log(.scroll, "  → skipped (same block)")
-            return
-        }
+        guard blockIndex != lastReportedBlockIndex else { return }
         lastReportedBlockIndex = blockIndex
-        DebugLog.log(.scroll, "  → calling onScrollProgress with \(percent)%")
         onTopBlockChange?(blockIndex)
-        onScrollProgress?(percent)
+        // Note: onScrollProgress is now handled by ContentView's scroll tracker
     }
 
     /// Only recompute match info when search parameters change
