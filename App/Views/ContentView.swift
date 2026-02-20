@@ -71,10 +71,15 @@ struct ContentView: View {
 
     // Cached rendered blocks (expensive to compute)
     @State private var renderedBlocks: [MarkdownBlock] = []
+    @State private var isRendering = false
+    @State private var renderTask: Task<Void, Never>?
 
     // Lint warnings
     @State private var lintWarnings: [LintWarning] = []
     @State private var lintUpdatePublisher = PassthroughSubject<String, Never>()
+
+    // Search debouncing
+    @State private var searchUpdatePublisher = PassthroughSubject<Void, Never>()
 
     // Mermaid expand overlay
     @State private var expandedMermaidSource: String?
@@ -150,7 +155,12 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.2), value: expandedMermaidSource != nil || expandedImageData != nil)
         .cheatSheetOnHold(isShowing: $showCheatSheet)
         .onAppear {
+            DebugLog.info(.lifecycle, "ContentView.onAppear - \(fileURL?.lastPathComponent ?? "untitled") (\(document.text.count) chars)")
+            DebugLog.logMemory(.lifecycle, context: "Document open")
             setupDebouncing()
+            updateHeadings(from: document.text)
+            updateRenderedBlocks(from: document.text)
+            setupFileWatcher()
         }
         .onChange(of: document.text) { _, newValue in
             // Send to debounce publisher for expensive operations
@@ -159,11 +169,6 @@ struct ContentView: View {
             documentStats = DocumentStats(text: newValue)
             // Send to lint debouncer (500ms)
             lintUpdatePublisher.send(newValue)
-        }
-        .onAppear {
-            updateHeadings(from: document.text)
-            updateRenderedBlocks(from: document.text)
-            setupFileWatcher()
         }
         .onDisappear {
             fileWatcher?.stop()
@@ -201,13 +206,13 @@ struct ContentView: View {
             formatDocument()
         }
         .onChange(of: searchText) { _, _ in
-            updateSearch()
+            searchUpdatePublisher.send()
         }
         .onChange(of: caseSensitive) { _, _ in
-            updateSearch()
+            searchUpdatePublisher.send()
         }
         .onChange(of: useRegex) { _, _ in
-            updateSearch()
+            searchUpdatePublisher.send()
         }
         .onChange(of: renderTrigger) { _, _ in
             updateRenderedBlocks(from: document.text)
@@ -300,17 +305,17 @@ struct ContentView: View {
 
     private func increaseFontSize() {
         readerFontSize = min(readerFontSize + Self.fontSizeStep, Self.maxFontSize)
-        updateRenderedBlocks(from: document.text)
+        // renderTrigger onChange handles updateRenderedBlocks
     }
 
     private func decreaseFontSize() {
         readerFontSize = max(readerFontSize - Self.fontSizeStep, Self.minFontSize)
-        updateRenderedBlocks(from: document.text)
+        // renderTrigger onChange handles updateRenderedBlocks
     }
 
     private func resetFontSize() {
         readerFontSize = Self.defaultFontSize
-        updateRenderedBlocks(from: document.text)
+        // renderTrigger onChange handles updateRenderedBlocks
     }
 
     @ViewBuilder
@@ -466,12 +471,59 @@ struct ContentView: View {
     }
 
     private func updateHeadings(from text: String) {
-        let doc = MarkdownParser.parse(text)
-        headings = MarkdownParser.extractHeadings(from: doc)
+        // For small documents, parse synchronously
+        if text.count < 50_000 {
+            let doc = MarkdownParser.parse(text)
+            headings = MarkdownParser.extractHeadings(from: doc)
+            return
+        }
+
+        // For large documents, parse on background thread
+        Task {
+            let extractedHeadings = await Task.detached(priority: .userInitiated) {
+                let doc = MarkdownParser.parse(text)
+                return MarkdownParser.extractHeadings(from: doc)
+            }.value
+
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                headings = extractedHeadings
+            }
+        }
     }
 
     private func updateRenderedBlocks(from text: String) {
-        renderedBlocks = BlockRenderer.render(text, style: renderStyle)
+        // Cancel any in-progress render
+        renderTask?.cancel()
+
+        // For small documents, render synchronously to avoid flicker
+        if text.count < 50_000 {
+            DebugLog.log(.rendering, "updateRenderedBlocks: sync path (\(text.count) chars)")
+            renderedBlocks = BlockRenderer.render(text, style: renderStyle)
+            return
+        }
+
+        // For large documents, render on background thread
+        DebugLog.log(.rendering, "updateRenderedBlocks: async path (\(text.count) chars)")
+        isRendering = true
+        let style = renderStyle  // Capture value type
+
+        renderTask = Task {
+            let blocks = await DebugLog.measureAsync(.rendering, "Background render") {
+                await Task.detached(priority: .userInitiated) {
+                    BlockRenderer.render(text, style: style)
+                }.value
+            }
+
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                renderedBlocks = blocks
+                isRendering = false
+                DebugLog.log(.rendering, "Render complete, \(blocks.count) blocks")
+            }
+        }
     }
 
     private func scrollToHeading(_ heading: HeadingInfo) {
@@ -651,6 +703,9 @@ struct ContentView: View {
     }
 
     private func setupDebouncing() {
+        // Guard against duplicate subscriptions
+        guard cancellables.isEmpty else { return }
+
         // Debounce expensive operations (150ms) - parsing, rendering, outline
         textUpdatePublisher
             .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
@@ -669,6 +724,13 @@ struct ContentView: View {
             }
             .store(in: &cancellables)
 
+        // Search debouncing (100ms to avoid excessive match counting)
+        searchUpdatePublisher
+            .debounce(for: .milliseconds(100), scheduler: RunLoop.main)
+            .sink { [self] in
+                updateSearch()
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - File Watching
@@ -734,83 +796,84 @@ struct ContentView: View {
 
     private var readerView: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                VStack(spacing: 0) {
-                    // Anchor at top for scroll restoration
-                    Color.clear.frame(height: 1).id("top")
+            ZStack {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        // Anchor at top for scroll restoration
+                        Color.clear.frame(height: 1).id("top")
 
-                    MarkdownReaderViewWithAnchors(
-                        text: document.text,
-                        headings: headings,
-                        blocks: renderedBlocks,
-                        documentURL: fileURL,
-                        searchText: searchText,
-                        caseSensitive: caseSensitive,
-                        useRegex: useRegex,
-                        currentMatchIndex: currentMatchIndex,
-                        codeFontSize: CGFloat(readerFontSize * 0.875),
-                        codeFontFamily: resolvedCodeFontFamily,
-                        onTaskToggle: handleTaskToggle,
-                        onTopBlockChange: updateCurrentHeading,
-                        onScrollProgress: { percent in
-                            // Debounce to update on scroll stop
-                            percentUpdateTask?.cancel()
-                            percentUpdateTask = Task {
-                                try? await Task.sleep(nanoseconds: 150_000_000)
-                                guard !Task.isCancelled else { return }
-                                displayedPercentRead = percent
-                            }
-                        },
-                        onMermaidExpand: { source in expandedMermaidSource = source }
-                    )
-                    .environment(\.onImageExpand) { imageData in expandedImageData = imageData }
-                    .padding(fullWidthReader ? 24 : 40)
-                    .frame(maxWidth: fullWidthReader ? .infinity : 720, alignment: .leading)
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear
-                                .preference(key: ScrollOffsetPreferenceKey.self, value: geo.frame(in: .named("reader-scroll")).minY)
-                                .onAppear {
-                                    contentHeight = geo.size.height
-                                }
-                                .onChange(of: geo.size.height) { _, newHeight in
-                                    contentHeight = newHeight
-                                }
-                        }
-                    )
+                        MarkdownReaderViewWithAnchors(
+                            text: document.text,
+                            headings: headings,
+                            blocks: renderedBlocks,
+                            documentURL: fileURL,
+                            searchText: searchText,
+                            caseSensitive: caseSensitive,
+                            useRegex: useRegex,
+                            currentMatchIndex: currentMatchIndex,
+                            codeFontSize: CGFloat(readerFontSize * 0.875),
+                            codeFontFamily: resolvedCodeFontFamily,
+                            onTaskToggle: handleTaskToggle,
+                            onTopBlockChange: updateCurrentHeading,
+                            onScrollProgress: handleScrollProgress,
+                            onMermaidExpand: handleMermaidExpand
+                        )
+                        .environment(\.onImageExpand, handleImageExpand)
+                        .padding(fullWidthReader ? 24 : 40)
+                        .frame(maxWidth: fullWidthReader ? .infinity : 720, alignment: .leading)
+                    }
+                }
+                .coordinateSpace(name: "reader-scroll")
+
+                // Loading indicator for large documents
+                if isRendering {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        Text("Rendering document...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(24)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
                 }
             }
-            .coordinateSpace(name: "reader-scroll")
             .onAppear {
                 scrollProxy = proxy
-                restoreScrollPosition(proxy: proxy)
             }
             .onDisappear {
                 saveScrollPosition()
             }
+            .onChange(of: isRendering) { _, newValue in
+                // Restore scroll position after rendering completes
+                if !newValue && !renderedBlocks.isEmpty {
+                    restoreScrollPosition(proxy: proxy)
+                }
+            }
             .onChange(of: scrollToHeadingIndex) { _, newIndex in
-                if let index = newIndex {
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        proxy.scrollTo("block-\(index)", anchor: .top)
-                    }
-                    // Reset after scrolling
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        scrollToHeadingIndex = nil
-                    }
+                // Don't scroll while rendering
+                guard !isRendering, let index = newIndex else { return }
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    proxy.scrollTo("block-\(index)", anchor: .top)
+                }
+                // Reset after scrolling
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    scrollToHeadingIndex = nil
                 }
             }
             .onChange(of: currentMatchIndex) { _, newIndex in
+                guard !isRendering else { return }
                 scrollToMatch(newIndex, proxy: proxy)
             }
             .onChange(of: searchMatches.count) { _, _ in
                 // Scroll to first match when search results change
-                if !searchMatches.isEmpty {
-                    scrollToMatch(0, proxy: proxy)
-                }
+                guard !isRendering, !searchMatches.isEmpty else { return }
+                scrollToMatch(0, proxy: proxy)
             }
         }
         .frame(maxWidth: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
+        .accessibilityIdentifier("reader-view")
     }
 
     private func saveScrollPosition() {
@@ -837,6 +900,24 @@ struct ContentView: View {
 
     private func handleTaskToggle(index: Int, newState: Bool) {
         document.text = MarkdownTextUtils.toggleTask(in: document.text, at: index, to: newState)
+    }
+
+    private func handleScrollProgress(_ percent: Int) {
+        // Debounce to update on scroll stop
+        percentUpdateTask?.cancel()
+        percentUpdateTask = Task {
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
+            displayedPercentRead = percent
+        }
+    }
+
+    private func handleMermaidExpand(_ source: String) {
+        expandedMermaidSource = source
+    }
+
+    private func handleImageExpand(_ imageData: ExpandedImageData) {
+        expandedImageData = imageData
     }
 
     // MARK: - Formatting
@@ -898,9 +979,9 @@ struct ContentView: View {
                         codeFontSize: CGFloat(readerFontSize * 0.875),
                         codeFontFamily: resolvedCodeFontFamily,
                         onTaskToggle: handleTaskToggle,
-                        onMermaidExpand: { source in expandedMermaidSource = source }
+                        onMermaidExpand: handleMermaidExpand
                     )
-                    .environment(\.onImageExpand) { imageData in expandedImageData = imageData }
+                    .environment(\.onImageExpand, handleImageExpand)
                     .padding(fullWidthReader ? 24 : 40)
                     .frame(maxWidth: fullWidthReader ? .infinity : 720, alignment: .leading)
                 }
@@ -920,14 +1001,7 @@ struct ContentView: View {
     }
 }
 
-/// MARK: - Scroll Position Tracking
-
-private struct ScrollOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
+// Note: ScrollOffsetPreferenceKey moved to MarkdownReaderView.swift
 
 #Preview {
     ContentView(document: .constant(MarkdownDocument(text: """

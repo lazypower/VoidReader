@@ -6,6 +6,37 @@ struct VoidReaderApp: App {
     @AppStorage("showStatusBar") private var showStatusBar = true
     @AppStorage("formatOnSave") private var formatOnSave = false
 
+    init() {
+        // Initialize debug logging on startup
+        DebugLog.logStartup()
+
+        // Handle --open argument for XCUITest
+        handleOpenArgument()
+    }
+
+    /// Open a document path passed via --open argument (for UI testing)
+    private func handleOpenArgument() {
+        let args = CommandLine.arguments
+        if let openIndex = args.firstIndex(of: "--open"),
+           openIndex + 1 < args.count {
+            let path = args[openIndex + 1]
+            let url = URL(fileURLWithPath: path)
+            DebugLog.info(.lifecycle, "Opening document from argument: \(path)")
+
+            // Open after a short delay to let the app finish launching
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                NSDocumentController.shared.openDocument(
+                    withContentsOf: url,
+                    display: true
+                ) { _, _, error in
+                    if let error = error {
+                        DebugLog.error(.lifecycle, "Failed to open: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+    }
+
     var body: some Scene {
         DocumentGroup(newDocument: MarkdownDocument()) { file in
             ContentView(document: file.$document, fileURL: file.fileURL)

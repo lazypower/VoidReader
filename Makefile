@@ -1,26 +1,37 @@
 # VoidReader Makefile
 # Run `make help` for available commands
 
-.PHONY: help project build run test clean format lint xcode setup install dmg dmg-signed staple
+.PHONY: help project build run run-debug test test-ui test-ui-debug clean format lint xcode setup install dmg dmg-signed staple
 
 # Default target
 help:
 	@echo "VoidReader Development Commands"
 	@echo ""
-	@echo "  make setup     - First-time setup (install dependencies)"
-	@echo "  make project   - Regenerate Xcode project from project.yml"
-	@echo "  make build     - Build the app (Debug)"
-	@echo "  make release   - Build the app (Release)"
-	@echo "  make install   - Build release and install to /Applications"
-	@echo "  make dmg       - Build release DMG for distribution (unsigned)"
-	@echo "  make dmg-signed - Build signed & notarized DMG (requires Apple Developer ID)"
-	@echo "  make staple    - Staple notarization ticket to existing DMG"
-	@echo "  make run       - Build and run the app"
-	@echo "  make test      - Run all tests"
-	@echo "  make clean     - Clean build artifacts"
-	@echo "  make format    - Format Swift code"
-	@echo "  make lint      - Lint Swift code"
-	@echo "  make xcode     - Open project in Xcode"
+	@echo "Build & Run:"
+	@echo "  make build        - Build the app (Debug)"
+	@echo "  make release      - Build the app (Release)"
+	@echo "  make run          - Build and run the app"
+	@echo "  make run-debug    - Run with debug telemetry (VOID_READER_DEBUG=1)"
+	@echo "  make run-debug-file - Run with debug telemetry + file logging"
+	@echo ""
+	@echo "Testing:"
+	@echo "  make test         - Run unit tests"
+	@echo "  make test-ui      - Run UI tests (XCUITest)"
+	@echo "  make test-ui-debug - Run UI tests with debug logging"
+	@echo ""
+	@echo "Project:"
+	@echo "  make setup        - First-time setup (install dependencies)"
+	@echo "  make project      - Regenerate Xcode project from project.yml"
+	@echo "  make xcode        - Open project in Xcode"
+	@echo "  make clean        - Clean build artifacts"
+	@echo "  make format       - Format Swift code"
+	@echo "  make lint         - Lint Swift code"
+	@echo ""
+	@echo "Distribution:"
+	@echo "  make install      - Build release and install to /Applications"
+	@echo "  make dmg          - Build release DMG (unsigned)"
+	@echo "  make dmg-signed   - Build signed & notarized DMG"
+	@echo "  make staple       - Staple notarization ticket to DMG"
 	@echo ""
 
 # First-time setup
@@ -69,14 +80,45 @@ run: build
 	@echo "Running VoidReader..."
 	@open "$$(xcodebuild -scheme VoidReader -configuration Debug -showBuildSettings | grep -m 1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/VoidReader.app"
 
-# Run tests
+# Run with debug telemetry enabled
+run-debug: build
+	@echo "Running VoidReader with debug telemetry..."
+	@VOID_READER_DEBUG=1 open "$$(xcodebuild -scheme VoidReader -configuration Debug -showBuildSettings | grep -m 1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/VoidReader.app"
+	@echo ""
+	@echo "View logs in Console.app with filter: subsystem:com.voidreader.debug"
+
+# Run with debug telemetry and file logging
+run-debug-file: build
+	@echo "Running VoidReader with debug telemetry (file logging)..."
+	@VOID_READER_DEBUG=1 VOID_READER_DEBUG_FILE=/tmp/voidreader_debug.log open "$$(xcodebuild -scheme VoidReader -configuration Debug -showBuildSettings | grep -m 1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/VoidReader.app"
+	@echo ""
+	@echo "Logs being written to: /tmp/voidreader_debug.log"
+	@echo "Tail with: tail -f /tmp/voidreader_debug.log"
+
+# Run tests (unit tests only)
 test:
 	@echo "Running package tests..."
 	swift test
 	@echo ""
 	@echo "Running app tests..."
-	xcodebuild -scheme VoidReader -configuration Debug test -quiet || true
+	xcodebuild -scheme VoidReader -configuration Debug test -only-testing:VoidReaderTests -quiet || true
 	@echo "✓ Tests complete"
+
+# Run UI tests
+test-ui:
+	@echo "Running UI tests..."
+	xcodebuild -scheme VoidReader -configuration Debug test -only-testing:VoidReaderUITests -quiet || true
+	@echo "✓ UI tests complete"
+
+# Run UI tests with debug telemetry and capture output
+test-ui-debug:
+	@echo "Running UI tests with debug telemetry..."
+	@rm -f /tmp/voidreader_uitest_*.log
+	xcodebuild -scheme VoidReader -configuration Debug test -only-testing:VoidReaderUITests 2>&1 | tee /tmp/uitest_output.log || true
+	@echo ""
+	@echo "✓ UI tests complete"
+	@echo "Debug logs written to: /tmp/voidreader_uitest_*.log"
+	@ls -la /tmp/voidreader_uitest_*.log 2>/dev/null || echo "No debug logs found"
 
 # Clean
 clean:

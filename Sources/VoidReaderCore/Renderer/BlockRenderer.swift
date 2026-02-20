@@ -7,28 +7,33 @@ public struct BlockRenderer {
 
     /// Renders markdown text to an array of content blocks.
     public static func render(_ text: String, style: MarkdownRenderer.Style = .init()) -> [MarkdownBlock] {
-        // Pre-process to extract math blocks ($$...$$)
-        let segments = extractMathBlocks(from: text)
+        let charCount = text.count
 
-        var allBlocks: [MarkdownBlock] = []
+        return DebugLog.measure(.rendering, "BlockRenderer.render(\(charCount) chars)") {
+            // Pre-process to extract math blocks ($$...$$)
+            let segments = extractMathBlocks(from: text)
 
-        for segment in segments {
-            switch segment {
-            case .markdown(let mdText):
-                // Parse and render markdown segment
-                let document = MarkdownParser.parse(mdText)
-                var walker = BlockWalker(style: style)
-                walker.visit(document)
-                walker.flushTextBuffer()
-                allBlocks.append(contentsOf: walker.blocks)
+            var allBlocks: [MarkdownBlock] = []
 
-            case .math(let latex):
-                // Add math block directly
-                allBlocks.append(.mathBlock(MathData(latex: latex, isBlock: true)))
+            for segment in segments {
+                switch segment {
+                case .markdown(let mdText):
+                    // Parse and render markdown segment
+                    let document = MarkdownParser.parse(mdText)
+                    var walker = BlockWalker(style: style)
+                    walker.visit(document)
+                    walker.flushTextBuffer()
+                    allBlocks.append(contentsOf: walker.blocks)
+
+                case .math(let latex):
+                    // Add math block directly
+                    allBlocks.append(.mathBlock(MathData(latex: latex, isBlock: true)))
+                }
             }
-        }
 
-        return allBlocks
+            DebugLog.log(.rendering, "  → produced \(allBlocks.count) blocks")
+            return allBlocks
+        }
     }
 
     /// Segments of content: either markdown text or math blocks
@@ -39,6 +44,11 @@ public struct BlockRenderer {
 
     /// Extract $$...$$ math blocks from text, returning alternating segments
     private static func extractMathBlocks(from text: String) -> [ContentSegment] {
+        // Fast path: if no $$ markers, skip regex entirely
+        guard text.contains("$$") else {
+            return [.markdown(text)]
+        }
+
         var segments: [ContentSegment] = []
         var remaining = text
         let pattern = "\\$\\$([\\s\\S]*?)\\$\\$"

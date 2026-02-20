@@ -116,7 +116,23 @@ targets:
       - path: Tests/VoidReaderCoreTests
     dependencies:
       - target: VoidReader
-      - package: VoidReaderCore
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+
+  VoidReaderUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: Tests/VoidReaderUITests
+    dependencies:
+      - target: VoidReader
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.voidreader.uitests
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: KAJX3B69UF
+        GENERATE_INFOPLIST_FILE: YES
 
 schemes:
   VoidReader:
@@ -129,6 +145,7 @@ schemes:
       config: Debug
       targets:
         - VoidReaderTests
+        - VoidReaderUITests
     profile:
       config: Release
     analyze:

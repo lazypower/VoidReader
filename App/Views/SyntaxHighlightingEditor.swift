@@ -35,6 +35,10 @@ struct SyntaxHighlightingEditor: NSViewRepresentable {
         // TODO: Gutter with line numbers/warnings needs custom container view
         // NSRulerView conflicts with NSTextView.scrollableTextView() layout
 
+        // Accessibility identifier for UI testing
+        scrollView.setAccessibilityIdentifier("editor-view")
+        textView.setAccessibilityIdentifier("editor-text-view")
+
         return scrollView
     }
 
@@ -118,7 +122,7 @@ struct SyntaxHighlightingEditor: NSViewRepresentable {
 
             // Debounce re-highlighting
             highlightTimer?.invalidate()
-            highlightTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { [weak self] _ in
+            highlightTimer = Timer.scheduledTimer(withTimeInterval: 0.20, repeats: false) { [weak self] _ in
                 guard let self = self else { return }
                 self.rehighlight(textView)
             }
@@ -127,27 +131,30 @@ struct SyntaxHighlightingEditor: NSViewRepresentable {
         private func rehighlight(_ textView: NSTextView) {
             guard let textStorage = textView.textStorage else { return }
 
-            // Save state
-            let selectedRanges = textView.selectedRanges
-            let visibleRect = textView.visibleRect
+            let charCount = textView.string.count
+            DebugLog.measure(.editor, "rehighlight(\(charCount) chars)") {
+                // Save state
+                let selectedRanges = textView.selectedRanges
+                let visibleRect = textView.visibleRect
 
-            // Apply highlighting
-            let highlighted = MarkdownSyntaxHighlighter.highlight(
-                textView.string,
-                theme: parent.theme,
-                colorScheme: parent.colorScheme,
-                font: parent.font
-            )
+                // Apply highlighting
+                let highlighted = MarkdownSyntaxHighlighter.highlight(
+                    textView.string,
+                    theme: parent.theme,
+                    colorScheme: parent.colorScheme,
+                    font: parent.font
+                )
 
-            isUpdating = true
-            textStorage.beginEditing()
-            textStorage.setAttributedString(highlighted)
-            textStorage.endEditing()
-            isUpdating = false
+                isUpdating = true
+                textStorage.beginEditing()
+                textStorage.setAttributedString(highlighted)
+                textStorage.endEditing()
+                isUpdating = false
 
-            // Restore state
-            textView.selectedRanges = selectedRanges
-            textView.scrollToVisible(visibleRect)
+                // Restore state
+                textView.selectedRanges = selectedRanges
+                textView.scrollToVisible(visibleRect)
+            }
         }
     }
 }
