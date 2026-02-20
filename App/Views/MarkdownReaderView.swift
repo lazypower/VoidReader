@@ -52,47 +52,58 @@ struct MarkdownReaderView: View {
     }
 }
 
-/// Debounced scroll position tracker - only fires after scrolling stops
+/// Efficient scroll position tracker using periodic sampling instead of per-frame updates.
+/// This approach avoids the jank caused by onChange(of: geo.frame...) firing every frame.
 struct ScrollPositionTracker: View {
     let coordinateSpace: String
     let blockCount: Int
     let onPositionUpdate: (Int, Int) -> Void
 
-    @State private var debounceTask: Task<Void, Never>?
-    @State private var currentOffset: CGFloat = 0
+    @State private var lastReportedPercent: Int = -1
 
     var body: some View {
         GeometryReader { geo in
             Color.clear
                 .onAppear {
-                    currentOffset = -geo.frame(in: .named(coordinateSpace)).minY
-                    reportPosition()
+                    updatePosition(from: geo)
                 }
-                .onChange(of: geo.frame(in: .named(coordinateSpace)).minY) { _, newY in
-                    currentOffset = -newY
-                    scheduleUpdate()
-                }
+                // Use preference key for efficient position tracking
+                .preference(
+                    key: ScrollOffsetPreferenceKey.self,
+                    value: -geo.frame(in: .named(coordinateSpace)).minY
+                )
         }
         .frame(height: 0)
-    }
-
-    private func scheduleUpdate() {
-        // Cancel any pending update
-        debounceTask?.cancel()
-
-        // Schedule new update after scroll stops (200ms idle)
-        debounceTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 200_000_000)
-            guard !Task.isCancelled else { return }
-            reportPosition()
+        .onPreferenceChange(ScrollOffsetPreferenceKey.self) { offset in
+            // Preference changes are batched by SwiftUI, more efficient than onChange
+            calculateAndReport(offset: offset)
         }
     }
 
-    private func reportPosition() {
+    private func updatePosition(from geo: GeometryProxy) {
+        let offset = -geo.frame(in: .named(coordinateSpace)).minY
+        calculateAndReport(offset: offset)
+    }
+
+    private func calculateAndReport(offset: CGFloat) {
         let estimatedBlockHeight: CGFloat = 60
-        let estimatedIndex = max(0, min(blockCount - 1, Int(currentOffset / estimatedBlockHeight)))
+        let estimatedIndex = max(0, min(blockCount - 1, Int(offset / estimatedBlockHeight)))
         let percent = blockCount > 1 ? (estimatedIndex * 100) / (blockCount - 1) : 0
-        onPositionUpdate(estimatedIndex, min(100, max(0, percent)))
+        let clampedPercent = min(100, max(0, percent))
+
+        // Only report if percent changed (avoids redundant updates)
+        if clampedPercent != lastReportedPercent {
+            lastReportedPercent = clampedPercent
+            onPositionUpdate(estimatedIndex, clampedPercent)
+        }
+    }
+}
+
+/// Preference key for scroll offset - batched updates are more efficient
+private struct ScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 
@@ -223,11 +234,11 @@ struct MarkdownReaderViewWithAnchors: View {
         updateMatchInfoIfNeeded(blocks: blocks)
     }
 
-    /// Scroll tracker - only updates after scroll stops (debounced)
-    /// Disabled for very large documents (>3000 blocks) - causes scroll jank
+    /// Scroll tracker using efficient PreferenceKey-based position detection.
+    /// Only reports when percentage actually changes.
     @ViewBuilder
     private var scrollTracker: some View {
-        if blockCount > 0 && blockCount < 3000 {
+        if blockCount > 0 {
             ScrollPositionTracker(
                 coordinateSpace: "reader-scroll",
                 blockCount: blockCount,
