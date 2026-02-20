@@ -504,26 +504,77 @@ struct ContentView: View {
             return
         }
 
-        // For large documents, render on background thread
-        DebugLog.log(.rendering, "updateRenderedBlocks: async path (\(text.count) chars)")
+        // For large documents, use progressive rendering:
+        // 1. Render first screen immediately (fast)
+        // 2. Continue rendering rest in background
+        // 3. Update view incrementally
+        DebugLog.log(.rendering, "updateRenderedBlocks: progressive path (\(text.count) chars)")
         isRendering = true
         let style = renderStyle  // Capture value type
 
+        // Step 1: Immediately render the first chunk (first ~20KB or first 500 lines)
+        let firstChunkEnd = findFirstChunkEnd(in: text)
+        let firstChunk = String(text.prefix(firstChunkEnd))
+
+        let initialBlocks = DebugLog.measure(.rendering, "Initial chunk (\(firstChunk.count) chars)") {
+            BlockRenderer.render(firstChunk, style: style)
+        }
+        renderedBlocks = initialBlocks
+        DebugLog.log(.rendering, "  → Initial \(initialBlocks.count) blocks shown immediately")
+
+        // If we rendered everything in the first chunk, we're done
+        if firstChunkEnd >= text.count {
+            isRendering = false
+            DebugLog.logMemory(.perf, context: "After render complete (single chunk)")
+            return
+        }
+
+        // Step 2: Render the rest in background
+        let remainingText = String(text.dropFirst(firstChunkEnd))
+
         renderTask = Task {
-            let blocks = await DebugLog.measureAsync(.rendering, "Background render") {
+            let moreBlocks = await DebugLog.measureAsync(.rendering, "Background render (\(remainingText.count) chars)") {
                 await Task.detached(priority: .userInitiated) {
-                    BlockRenderer.render(text, style: style)
+                    BlockRenderer.render(remainingText, style: style)
                 }.value
             }
 
             guard !Task.isCancelled else { return }
 
             await MainActor.run {
-                renderedBlocks = blocks
+                DebugLog.log(.rendering, "Appending \(moreBlocks.count) blocks...")
+                let assignStart = CFAbsoluteTimeGetCurrent()
+                renderedBlocks = initialBlocks + moreBlocks
+                let assignTime = (CFAbsoluteTimeGetCurrent() - assignStart) * 1000
+                DebugLog.log(.rendering, "Block append took \(String(format: "%.2f", assignTime))ms")
+                DebugLog.log(.rendering, "  → Total \(renderedBlocks.count) blocks")
                 isRendering = false
-                DebugLog.log(.rendering, "Render complete, \(blocks.count) blocks")
+                DebugLog.logMemory(.perf, context: "After render complete")
             }
         }
+    }
+
+    /// Find the end of the first chunk - targets ~20KB or ~500 lines, whichever comes first.
+    /// Always ends at a line boundary to avoid breaking markdown elements.
+    private func findFirstChunkEnd(in text: String) -> Int {
+        let targetSize = 20_000  // ~20KB
+        let maxLines = 500
+
+        var lineCount = 0
+        var charCount = 0
+
+        for char in text {
+            charCount += 1
+            if char == "\n" {
+                lineCount += 1
+                // Stop if we hit either limit
+                if charCount >= targetSize || lineCount >= maxLines {
+                    return charCount
+                }
+            }
+        }
+
+        return text.count  // Document is smaller than our target
     }
 
     private func scrollToHeading(_ heading: HeadingInfo) {

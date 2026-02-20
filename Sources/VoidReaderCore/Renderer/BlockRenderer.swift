@@ -11,7 +11,9 @@ public struct BlockRenderer {
 
         return DebugLog.measure(.rendering, "BlockRenderer.render(\(charCount) chars)") {
             // Pre-process to extract math blocks ($$...$$)
-            let segments = extractMathBlocks(from: text)
+            let segments = DebugLog.measure(.rendering, "  extractMathBlocks") {
+                extractMathBlocks(from: text)
+            }
 
             var allBlocks: [MarkdownBlock] = []
 
@@ -19,11 +21,16 @@ public struct BlockRenderer {
                 switch segment {
                 case .markdown(let mdText):
                     // Parse and render markdown segment
-                    let document = MarkdownParser.parse(mdText)
-                    var walker = BlockWalker(style: style)
-                    walker.visit(document)
-                    walker.flushTextBuffer()
-                    allBlocks.append(contentsOf: walker.blocks)
+                    let document = DebugLog.measure(.rendering, "  MarkdownParser.parse(\(mdText.count) chars)") {
+                        MarkdownParser.parse(mdText)
+                    }
+
+                    DebugLog.measure(.rendering, "  BlockWalker.visit") {
+                        var walker = BlockWalker(style: style)
+                        walker.visit(document)
+                        walker.flushTextBuffer()
+                        allBlocks.append(contentsOf: walker.blocks)
+                    }
 
                 case .math(let latex):
                     // Add math block directly

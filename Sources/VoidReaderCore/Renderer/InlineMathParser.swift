@@ -12,6 +12,22 @@ public struct InlineMathParser {
         public let range: Range<String.Index>
     }
 
+    // Cached regex for performance - compiled once, reused
+    private static let mathRegex: NSRegularExpression? = {
+        // Pattern explanation:
+        // (?<!\\)     - Negative lookbehind: not preceded by backslash (escaped)
+        // (?<!\$)     - Negative lookbehind: not preceded by $ (would be $$)
+        // \$          - Literal opening $
+        // (?!\$)      - Negative lookahead: not followed by $ (would be $$)
+        // ([^$]+?)    - Capture group: one or more non-$ characters (non-greedy)
+        // \$          - Literal closing $
+        // (?!\$)      - Negative lookahead: closing $ not followed by $ (would be $$)
+        //
+        // This ensures we match $x$ but not $$x$$ or $$ or \$
+        let pattern = #"(?<!\\)(?<!\$)\$(?!\$)([^$]+?)\$(?!\$)"#
+        return try? NSRegularExpression(pattern: pattern, options: [])
+    }()
+
     /// Extracts all inline math expressions from text.
     ///
     /// Rules:
@@ -23,22 +39,14 @@ public struct InlineMathParser {
     /// - Parameter text: The source text to parse
     /// - Returns: Array of matches with latex content and ranges
     public static func extract(from text: String) -> [Match] {
+        // Fast path: if no $ in text, skip regex
+        guard text.contains("$") else {
+            return []
+        }
+
         var matches: [Match] = []
 
-        // Pattern explanation:
-        // (?<!\\)     - Negative lookbehind: not preceded by backslash (escaped)
-        // (?<!\$)     - Negative lookbehind: not preceded by $ (would be $$)
-        // \$          - Literal opening $
-        // (?!\$)      - Negative lookahead: not followed by $ (would be $$)
-        // ([^$]+?)    - Capture group: one or more non-$ characters (non-greedy)
-        // \$          - Literal closing $
-        // (?!\$)      - Negative lookahead: closing $ not followed by $ (would be $$)
-        //
-        // This ensures we match $x$ but not $$x$$ or $$ or \$
-
-        let pattern = #"(?<!\\)(?<!\$)\$(?!\$)([^$]+?)\$(?!\$)"#
-
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+        guard let regex = mathRegex else {
             return []
         }
 
