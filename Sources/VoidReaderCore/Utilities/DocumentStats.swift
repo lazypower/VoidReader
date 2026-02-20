@@ -9,7 +9,24 @@ public struct DocumentStats: Equatable {
     public let readingTimeMinutes: Int
 
     public init(text: String) {
-        // Character counts
+        // For very large documents, use fast estimation instead of expensive string ops
+        if text.count > 100_000 {
+            self.characterCount = text.count
+            // Estimate: assume ~15% whitespace (typical for prose)
+            self.characterCountNoSpaces = Int(Double(text.count) * 0.85)
+            // Count newlines efficiently with a simple loop
+            var newlineCount = 0
+            for char in text where char == "\n" {
+                newlineCount += 1
+            }
+            self.lineCount = text.isEmpty ? 0 : newlineCount + 1
+            // Estimate: ~5 chars per word average
+            self.wordCount = text.count / 5
+            self.readingTimeMinutes = max(1, self.wordCount / 200)
+            return
+        }
+
+        // For normal documents, compute exact stats
         self.characterCount = text.count
         self.characterCountNoSpaces = text.filter { !$0.isWhitespace }.count
 

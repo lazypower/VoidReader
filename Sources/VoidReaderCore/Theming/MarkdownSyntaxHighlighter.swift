@@ -41,6 +41,25 @@ private struct SyntaxColorWalker: MarkupWalker {
     let palette: ThemePalette
     let font: NSFont
 
+    // Pre-computed line offsets for O(1) character offset lookup
+    let lineOffsets: [Int]
+
+    init(source: String, result: NSMutableAttributedString, palette: ThemePalette, font: NSFont) {
+        self.source = source
+        self.result = result
+        self.palette = palette
+        self.font = font
+
+        // Build line offset table once: O(n)
+        var offsets: [Int] = [0]
+        for (i, char) in source.enumerated() {
+            if char == "\n" {
+                offsets.append(i + 1)
+            }
+        }
+        self.lineOffsets = offsets
+    }
+
     // MARK: - Headings (Mauve)
 
     mutating func visitHeading(_ heading: Heading) {
@@ -212,26 +231,14 @@ private struct SyntaxColorWalker: MarkupWalker {
         }
     }
 
-    /// Convert SourceLocation (line:column) to character offset
+    /// Convert SourceLocation (line:column) to character offset - O(1) lookup
     private func charOffset(from loc: SourceLocation) -> Int? {
-        var offset = 0
-        var currentLine = 1
-
-        for char in source {
-            if currentLine == loc.line {
-                return offset + (loc.column - 1)
-            }
-            if char == "\n" {
-                currentLine += 1
-            }
-            offset += 1
-        }
-
-        // If we're on the last line
-        if currentLine == loc.line {
-            return offset + (loc.column - 1)
-        }
-
-        return nil
+        // Lines are 1-indexed in SourceLocation
+        guard loc.line > 0, loc.line <= lineOffsets.count else { return nil }
+        let lineStart = lineOffsets[loc.line - 1]
+        let offset = lineStart + (loc.column - 1)
+        // Bounds check
+        guard offset >= 0, offset <= source.count else { return nil }
+        return offset
     }
 }
