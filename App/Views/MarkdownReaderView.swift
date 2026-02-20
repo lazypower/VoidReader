@@ -2,6 +2,7 @@ import SwiftUI
 import VoidReaderCore
 
 /// Renders markdown text as native SwiftUI content.
+/// Uses LazyVStack for virtual scrolling performance on large documents.
 struct MarkdownReaderView: View {
     let text: String
     var blocks: [MarkdownBlock] = []
@@ -15,7 +16,7 @@ struct MarkdownReaderView: View {
         // Use provided blocks or render if empty (fallback for previews)
         let renderBlocks = blocks.isEmpty ? BlockRenderer.render(text) : blocks
 
-        VStack(alignment: .leading, spacing: 16) {
+        LazyVStack(alignment: .leading, spacing: 16) {
             ForEach(renderBlocks) { block in
                 blockView(for: block)
             }
@@ -51,15 +52,52 @@ struct MarkdownReaderView: View {
     }
 }
 
-/// Preference key for tracking block positions.
-struct BlockPositionPreferenceKey: PreferenceKey {
-    static var defaultValue: [Int: CGFloat] = [:]
-    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
-        value.merge(nextValue()) { _, new in new }
+/// Debounced scroll position tracker - only fires after scrolling stops
+struct ScrollPositionTracker: View {
+    let coordinateSpace: String
+    let blockCount: Int
+    let onPositionUpdate: (Int, Int) -> Void
+
+    @State private var debounceTask: Task<Void, Never>?
+    @State private var currentOffset: CGFloat = 0
+
+    var body: some View {
+        GeometryReader { geo in
+            Color.clear
+                .onAppear {
+                    currentOffset = -geo.frame(in: .named(coordinateSpace)).minY
+                    reportPosition()
+                }
+                .onChange(of: geo.frame(in: .named(coordinateSpace)).minY) { _, newY in
+                    currentOffset = -newY
+                    scheduleUpdate()
+                }
+        }
+        .frame(height: 0)
+    }
+
+    private func scheduleUpdate() {
+        // Cancel any pending update
+        debounceTask?.cancel()
+
+        // Schedule new update after scroll stops (200ms idle)
+        debounceTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            guard !Task.isCancelled else { return }
+            reportPosition()
+        }
+    }
+
+    private func reportPosition() {
+        let estimatedBlockHeight: CGFloat = 60
+        let estimatedIndex = max(0, min(blockCount - 1, Int(currentOffset / estimatedBlockHeight)))
+        let percent = blockCount > 1 ? (estimatedIndex * 100) / (blockCount - 1) : 0
+        onPositionUpdate(estimatedIndex, min(100, max(0, percent)))
     }
 }
 
 /// Renders markdown with block-level anchors for scroll navigation.
+/// Uses LazyVStack for virtual scrolling performance on large documents.
 struct MarkdownReaderViewWithAnchors: View {
     let text: String
     let headings: [HeadingInfo]
@@ -76,59 +114,142 @@ struct MarkdownReaderViewWithAnchors: View {
     var onScrollProgress: ((Int) -> Void)?  // Reports percent read (0-100)
     var onMermaidExpand: ((String) -> Void)?
 
+    /// Cached search match info - only recomputed when search changes
+    @State private var cachedMatchInfo: MatchInfo = MatchInfo()
+    @State private var lastSearchKey: String = ""
+
+    /// Cached block count to avoid recalculating
+    @State private var blockCount: Int = 0
+
+    /// Last reported scroll position to avoid redundant updates
+    @State private var lastReportedBlockIndex: Int = -1
+    @State private var lastReportedOffset: CGFloat = 0
+
+    /// Chunk size for large document virtualization
+    private static let chunkSize = 100
+
     var body: some View {
-        // Use provided blocks or render if empty (fallback)
-        let renderBlocks = blocks.isEmpty ? BlockRenderer.render(text) : blocks
-        let matchInfo = computeMatchInfo(blocks: renderBlocks)
+        // Use provided blocks - empty means still loading (don't fallback to sync render)
+        let renderBlocks = blocks
 
-        VStack(alignment: .leading, spacing: 16) {
-            ForEach(Array(renderBlocks.enumerated()), id: \.offset) { index, block in
-                // Add match anchor if this block contains the current match
-                if let matchIdx = matchInfo.blockToFirstMatch[index], matchIdx == currentMatchIndex {
-                    Color.clear.frame(height: 0).id("match-\(currentMatchIndex)")
+        // For large documents, use chunked rendering to reduce LazyVStack item count
+        if renderBlocks.count > 1000 {
+            chunkedContent(blocks: renderBlocks)
+                .onAppear {
+                    DebugLog.log(.rendering, "Chunked content appearing: \(renderBlocks.count) blocks")
                 }
+        } else {
+            directContent(blocks: renderBlocks)
+        }
+    }
 
-                BlockView(
-                    block: block,
+    /// Direct rendering for smaller documents (< 1000 blocks)
+    @ViewBuilder
+    private func directContent(blocks renderBlocks: [MarkdownBlock]) -> some View {
+        LazyVStack(alignment: .leading, spacing: 16) {
+            ForEach(renderBlocks.indices, id: \.self) { index in
+                blockContent(at: index, in: renderBlocks)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(scrollTracker)
+        .onAppear { setupState(blocks: renderBlocks) }
+        .onChange(of: renderBlocks.count) { _, newCount in blockCount = newCount }
+        .onChange(of: searchText) { _, _ in updateMatchInfoIfNeeded(blocks: renderBlocks) }
+        .onChange(of: caseSensitive) { _, _ in updateMatchInfoIfNeeded(blocks: renderBlocks) }
+        .onChange(of: useRegex) { _, _ in updateMatchInfoIfNeeded(blocks: renderBlocks) }
+    }
+
+    /// Chunked rendering for large documents - reduces LazyVStack items from N to N/100
+    @ViewBuilder
+    private func chunkedContent(blocks renderBlocks: [MarkdownBlock]) -> some View {
+        let chunkCount = (renderBlocks.count + Self.chunkSize - 1) / Self.chunkSize
+
+        LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(0..<chunkCount, id: \.self) { chunkIndex in
+                let startIdx = chunkIndex * Self.chunkSize
+                let endIdx = min(startIdx + Self.chunkSize, renderBlocks.count)
+
+                // Each chunk is a VStack of its blocks with estimated total height
+                ChunkView(
+                    blocks: renderBlocks,
+                    startIndex: startIdx,
+                    endIndex: endIdx,
                     documentURL: documentURL,
                     searchText: searchText,
-                    matchRanges: matchInfo.blockMatches[index] ?? [],
+                    cachedMatchInfo: cachedMatchInfo,
+                    currentMatchIndex: currentMatchIndex,
                     codeFontSize: codeFontSize,
                     codeFontFamily: codeFontFamily,
                     onTaskToggle: onTaskToggle,
                     onMermaidExpand: onMermaidExpand
                 )
-                .id("block-\(index)")
-                .background(
-                    GeometryReader { geo in
-                        Color.clear.preference(
-                            key: BlockPositionPreferenceKey.self,
-                            value: [index: geo.frame(in: .named("reader-scroll")).minY]
-                        )
-                    }
-                )
+                .id("chunk-\(chunkIndex)")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onPreferenceChange(BlockPositionPreferenceKey.self) { positions in
-            // Find the topmost block that's at or above the top of the viewport
-            let topBlock = positions
-                .filter { $0.value <= 60 } // Within ~60pt of top (accounting for padding)
-                .max(by: { $0.value < $1.value }) // Highest Y value still above threshold
+        .background(scrollTracker)
+        .onAppear { setupState(blocks: renderBlocks) }
+        .onChange(of: renderBlocks.count) { _, newCount in blockCount = newCount }
+        .onChange(of: searchText) { _, _ in updateMatchInfoIfNeeded(blocks: renderBlocks) }
+        .onChange(of: caseSensitive) { _, _ in updateMatchInfoIfNeeded(blocks: renderBlocks) }
+        .onChange(of: useRegex) { _, _ in updateMatchInfoIfNeeded(blocks: renderBlocks) }
+    }
 
-            if let blockIndex = topBlock?.key {
-                onTopBlockChange?(blockIndex)
-
-                // Calculate scroll progress as percentage of blocks read
-                let totalBlocks = positions.count
-                if totalBlocks > 1 {
-                    let percent = (blockIndex * 100) / (totalBlocks - 1)
-                    onScrollProgress?(min(100, max(0, percent)))
-                } else {
-                    onScrollProgress?(0)
-                }
-            }
+    /// Individual block content with anchors
+    @ViewBuilder
+    private func blockContent(at index: Int, in renderBlocks: [MarkdownBlock]) -> some View {
+        // Add match anchor if this block contains the current match
+        if let matchIdx = cachedMatchInfo.blockToFirstMatch[index], matchIdx == currentMatchIndex {
+            Color.clear.frame(height: 0).id("match-\(currentMatchIndex)")
         }
+
+        BlockView(
+            block: renderBlocks[index],
+            documentURL: documentURL,
+            searchText: searchText,
+            matchRanges: cachedMatchInfo.blockMatches[index] ?? [],
+            codeFontSize: codeFontSize,
+            codeFontFamily: codeFontFamily,
+            onTaskToggle: onTaskToggle,
+            onMermaidExpand: onMermaidExpand
+        )
+        .frame(minHeight: renderBlocks[index].estimatedHeight)
+        .id("block-\(index)")
+    }
+
+    private func setupState(blocks: [MarkdownBlock]) {
+        blockCount = blocks.count
+        updateMatchInfoIfNeeded(blocks: blocks)
+    }
+
+    /// Scroll tracker - only updates after scroll stops (debounced)
+    /// Disabled for very large documents (>3000 blocks) - causes scroll jank
+    @ViewBuilder
+    private var scrollTracker: some View {
+        if blockCount > 0 && blockCount < 3000 {
+            ScrollPositionTracker(
+                coordinateSpace: "reader-scroll",
+                blockCount: blockCount,
+                onPositionUpdate: handleScrollUpdate
+            )
+        }
+    }
+
+    /// Handle debounced scroll position update
+    private func handleScrollUpdate(blockIndex: Int, percent: Int) {
+        guard blockIndex != lastReportedBlockIndex else { return }
+        lastReportedBlockIndex = blockIndex
+        onTopBlockChange?(blockIndex)
+        onScrollProgress?(percent)
+    }
+
+    /// Only recompute match info when search parameters change
+    private func updateMatchInfoIfNeeded(blocks: [MarkdownBlock]) {
+        let searchKey = "\(searchText)-\(caseSensitive)-\(useRegex)"
+        guard searchKey != lastSearchKey else { return }
+        lastSearchKey = searchKey
+        cachedMatchInfo = computeMatchInfo(blocks: blocks)
     }
 
     struct MatchInfo {
@@ -204,6 +325,55 @@ struct MarkdownReaderViewWithAnchors: View {
         }
 
         return nil
+    }
+}
+
+/// A chunk of blocks rendered together for large document virtualization.
+/// Reduces LazyVStack item count from N to N/chunkSize.
+private struct ChunkView: View {
+    let blocks: [MarkdownBlock]
+    let startIndex: Int
+    let endIndex: Int
+    var documentURL: URL? = nil
+    var searchText: String = ""
+    var cachedMatchInfo: MarkdownReaderViewWithAnchors.MatchInfo = .init()
+    var currentMatchIndex: Int = 0
+    var codeFontSize: CGFloat = 13
+    var codeFontFamily: String? = nil
+    var onTaskToggle: ((Int, Bool) -> Void)?
+    var onMermaidExpand: ((String) -> Void)?
+
+    /// Estimated total height for this chunk
+    private var estimatedHeight: CGFloat {
+        var total: CGFloat = 0
+        for i in startIndex..<endIndex {
+            total += blocks[i].estimatedHeight + 16 // Include spacing
+        }
+        return total
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach(startIndex..<endIndex, id: \.self) { index in
+                // Add match anchor if this block contains the current match
+                if let matchIdx = cachedMatchInfo.blockToFirstMatch[index], matchIdx == currentMatchIndex {
+                    Color.clear.frame(height: 0).id("match-\(currentMatchIndex)")
+                }
+
+                BlockView(
+                    block: blocks[index],
+                    documentURL: documentURL,
+                    searchText: searchText,
+                    matchRanges: cachedMatchInfo.blockMatches[index] ?? [],
+                    codeFontSize: codeFontSize,
+                    codeFontFamily: codeFontFamily,
+                    onTaskToggle: onTaskToggle,
+                    onMermaidExpand: onMermaidExpand
+                )
+                .id("block-\(index)")
+            }
+        }
+        .frame(minHeight: estimatedHeight)
     }
 }
 
