@@ -14,6 +14,8 @@ struct CodeBlockView: View {
     var fontSize: CGFloat = 13
     var fontFamily: String? = nil  // nil = system mono
     @State private var showCopied = false
+    @State private var cachedHighlight: AttributedString?
+    @State private var cacheKey: String = ""
     @Environment(\.colorScheme) private var colorScheme
 
     // Theme config - single point to change later
@@ -78,11 +80,18 @@ struct CodeBlockView: View {
         }
         .background(Color(nsColor: .quaternaryLabelColor).opacity(0.3))
         .cornerRadius(8)
+        .onAppear { updateHighlightCache() }
+        .onChange(of: colorScheme) { _, _ in updateHighlightCache() }
+    }
+
+    /// Key that invalidates the highlight cache when inputs change
+    private var highlightKey: String {
+        "\(data.code.hashValue)-\(themeName)-\(fontSize)-\(fontFamily ?? "")"
     }
 
     @ViewBuilder
     private var highlightedCode: some View {
-        if let highlighted = highlightCode() {
+        if let highlighted = cachedHighlight {
             Text(highlighted)
         } else {
             // Fallback to plain text
@@ -91,30 +100,30 @@ struct CodeBlockView: View {
         }
     }
 
-    private func highlightCode() -> AttributedString? {
-        guard let highlightr = highlightr else { return nil }
+    private func updateHighlightCache() {
+        let key = highlightKey
+        guard key != cacheKey else { return }
 
-        // Set theme based on color scheme
+        guard let highlightr = highlightr else { return }
+
         highlightr.setTheme(to: themeName)
-
-        // Use language hint or let Highlightr auto-detect
         let language = data.language?.lowercased()
 
         guard let nsAttr = highlightr.highlight(data.code, as: language) else {
-            return nil
+            cachedHighlight = nil
+            cacheKey = key
+            return
         }
 
-        // Convert to mutable to adjust font
         let mutableAttr = NSMutableAttributedString(attributedString: nsAttr)
         let fullRange = NSRange(location: 0, length: mutableAttr.length)
 
-        // Update font to use our font family and size
         mutableAttr.enumerateAttribute(.font, in: fullRange, options: []) { value, range, _ in
             mutableAttr.addAttribute(.font, value: nsFont, range: range)
         }
 
-        // Convert NSAttributedString to SwiftUI AttributedString
-        return try? AttributedString(mutableAttr, including: AttributeScopes.AppKitAttributes.self)
+        cachedHighlight = try? AttributedString(mutableAttr, including: AttributeScopes.AppKitAttributes.self)
+        cacheKey = key
     }
 
     private func copyCode() {

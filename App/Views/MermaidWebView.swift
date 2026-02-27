@@ -15,6 +15,7 @@ struct MermaidWebView: NSViewRepresentable {
     let source: String
     @Binding var renderedHeight: CGFloat
     @Binding var hasError: Bool
+    var errorMessage: Binding<String>? = nil
     var allowsInteraction: Bool = false  // Enable zoom/pan for expanded view
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("selectedThemeID") private var selectedThemeID: String = "system"
@@ -58,7 +59,7 @@ struct MermaidWebView: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(heightBinding: $renderedHeight, errorBinding: $hasError)
+        Coordinator(heightBinding: $renderedHeight, errorBinding: $hasError, errorMessageBinding: errorMessage)
     }
 
     private func loadMermaid(in webView: WKWebView) {
@@ -107,10 +108,12 @@ struct MermaidWebView: NSViewRepresentable {
         var lastThemeID: String?
         var heightBinding: Binding<CGFloat>
         var errorBinding: Binding<Bool>
+        var errorMessageBinding: Binding<String>?
 
-        init(heightBinding: Binding<CGFloat>, errorBinding: Binding<Bool>) {
+        init(heightBinding: Binding<CGFloat>, errorBinding: Binding<Bool>, errorMessageBinding: Binding<String>? = nil) {
             self.heightBinding = heightBinding
             self.errorBinding = errorBinding
+            self.errorMessageBinding = errorMessageBinding
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -120,6 +123,7 @@ struct MermaidWebView: NSViewRepresentable {
             }
 
             let success = body["success"] as? Bool ?? true
+            let errorMessage = body["error"] as? String
 
             // Update bindings on main thread
             DispatchQueue.main.async {
@@ -127,6 +131,7 @@ struct MermaidWebView: NSViewRepresentable {
                     self.heightBinding.wrappedValue = CGFloat(height) + 16
                     self.errorBinding.wrappedValue = false
                 } else {
+                    self.errorMessageBinding?.wrappedValue = errorMessage ?? "Unknown rendering error"
                     self.errorBinding.wrappedValue = true
                 }
             }
@@ -143,6 +148,9 @@ struct MermaidWebView: NSViewRepresentable {
     }
 }
 
+/// Cache of mermaid sources that failed to render (source → error message).
+private nonisolated(unsafe) var mermaidErrorCache = [String: String]()
+
 /// A block view for mermaid diagrams with loading state and error handling.
 struct MermaidBlockView: View {
     let data: MermaidData
@@ -150,23 +158,68 @@ struct MermaidBlockView: View {
     @State private var renderedHeight: CGFloat = 0
     @State private var hasError = false
     @State private var isRendered = false
+    @State private var errorMessage: String = ""
+    @State private var showingError = false
+
+    /// Check cache synchronously — prevents WebView creation on recycled views
+    private var cachedError: String? {
+        mermaidErrorCache[data.source]
+    }
 
     // Display height animates from 0 to final height
     private var displayHeight: CGFloat {
         isRendered ? renderedHeight : 0
     }
 
+    private var isError: Bool {
+        hasError || cachedError != nil
+    }
+
+    private var displayErrorMessage: String {
+        if !errorMessage.isEmpty { return errorMessage }
+        return cachedError ?? ""
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Header with mermaid icon/label and expand button
             HStack {
-                Image(systemName: hasError ? "exclamationmark.triangle" : "chart.bar.doc.horizontal")
-                    .foregroundColor(hasError ? .orange : .secondary)
-                Text(hasError ? "Mermaid Error" : "Mermaid Diagram")
+                Image(systemName: isError ? "exclamationmark.triangle" : "chart.bar.doc.horizontal")
+                    .foregroundColor(isError ? .orange : .secondary)
+                Text(isError ? "Mermaid Error" : "Mermaid Diagram")
                     .font(.caption)
-                    .foregroundColor(hasError ? .orange : .secondary)
+                    .foregroundColor(isError ? .orange : .secondary)
+
+                if isError && !displayErrorMessage.isEmpty {
+                    Button {
+                        showingError.toggle()
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 11))
+                            .foregroundColor(.orange)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Show error details")
+                    .popover(isPresented: $showingError) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Mermaid Render Error")
+                                .font(.headline)
+                            ScrollView {
+                                Text(displayErrorMessage)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .padding()
+                        .frame(width: 420)
+                        .frame(maxHeight: 300)
+                    }
+                }
+
                 Spacer()
-                if !hasError && isRendered {
+                if !isError && isRendered {
                     Button {
                         onExpand?(data.source)
                     } label: {
@@ -179,12 +232,12 @@ struct MermaidBlockView: View {
                 }
             }
 
-            if hasError {
+            if isError {
                 // Fallback: show raw mermaid code
                 CodeBlockView(data: CodeBlockData(code: data.source, language: "mermaid"))
             } else {
                 // WebView - grows in smoothly when rendered
-                MermaidWebView(source: data.source, renderedHeight: $renderedHeight, hasError: $hasError)
+                MermaidWebView(source: data.source, renderedHeight: $renderedHeight, hasError: $hasError, errorMessage: $errorMessage)
                     .frame(height: max(displayHeight, 1)) // min 1 to keep WebView alive
                     .frame(maxWidth: .infinity)
                     .background(Color(nsColor: .controlBackgroundColor))
@@ -195,6 +248,11 @@ struct MermaidBlockView: View {
         }
         .padding(.vertical, 4)
         .animation(.easeInOut(duration: 0.35), value: isRendered)
+        .onChange(of: hasError) { _, isError in
+            if isError {
+                mermaidErrorCache[data.source] = errorMessage.isEmpty ? "Unknown error" : errorMessage
+            }
+        }
         .onChange(of: renderedHeight) { _, newValue in
             // Mark as rendered once we get real dimensions
             if newValue > 0 && !isRendered {

@@ -6,9 +6,9 @@ struct TableBlockView: View {
     let data: TableData
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
             // Header row
-            HStack(spacing: 0) {
+            GridRow {
                 ForEach(Array(data.headers.enumerated()), id: \.element.id) { index, cell in
                     let alignment = index < data.alignments.count ? data.alignments[index] : .left
 
@@ -25,7 +25,7 @@ struct TableBlockView: View {
 
             // Body rows
             ForEach(Array(data.rows.enumerated()), id: \.offset) { rowIndex, row in
-                HStack(spacing: 0) {
+                GridRow {
                     ForEach(Array(row.enumerated()), id: \.element.id) { cellIndex, cell in
                         let alignment = cellIndex < data.alignments.count ? data.alignments[cellIndex] : .left
 
@@ -40,6 +40,7 @@ struct TableBlockView: View {
 
                 if rowIndex < data.rows.count - 1 {
                     Divider()
+                        .gridCellUnsizedAxes(.horizontal)
                 }
             }
         }
