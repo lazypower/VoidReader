@@ -61,7 +61,9 @@ echo ""
 # Build
 # ============================================================================
 echo "Step 1/6: Building Release..."
-xcodebuild -scheme VoidReader -configuration Release -derivedDataPath build/derived clean build -quiet
+xcodebuild -scheme VoidReader -configuration Release -derivedDataPath build/derived \
+    CODE_SIGN_IDENTITY="-" CODE_SIGNING_ALLOWED=NO \
+    clean build -quiet
 
 APP_PATH="build/derived/Build/Products/Release/VoidReader.app"
 if [ ! -d "$APP_PATH" ]; then
