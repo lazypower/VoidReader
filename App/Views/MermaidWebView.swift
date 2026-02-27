@@ -16,7 +16,6 @@ struct MermaidWebView: NSViewRepresentable {
     @Binding var renderedHeight: CGFloat
     @Binding var hasError: Bool
     var allowsInteraction: Bool = false  // Enable zoom/pan for expanded view
-    var fitToWidth: Bool = false  // Scale diagram to fit container width
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("selectedThemeID") private var selectedThemeID: String = "system"
 
@@ -42,9 +41,6 @@ struct MermaidWebView: NSViewRepresentable {
 
         webView.navigationDelegate = context.coordinator
         webView.setValue(false, forKey: "drawsBackground") // Transparent background
-
-        // Store fitToWidth preference
-        context.coordinator.fitToWidth = fitToWidth
 
         return webView
     }
@@ -111,8 +107,6 @@ struct MermaidWebView: NSViewRepresentable {
         var lastThemeID: String?
         var heightBinding: Binding<CGFloat>
         var errorBinding: Binding<Bool>
-        var fitToWidth: Bool = false
-        var diagramWidth: CGFloat = 0
 
         init(heightBinding: Binding<CGFloat>, errorBinding: Binding<Bool>) {
             self.heightBinding = heightBinding
@@ -121,13 +115,11 @@ struct MermaidWebView: NSViewRepresentable {
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard let body = message.body as? [String: Any],
-                  let width = body["width"] as? Int,
                   let height = body["height"] as? Int else {
                 return
             }
 
             let success = body["success"] as? Bool ?? true
-            diagramWidth = CGFloat(width)
 
             // Update bindings on main thread
             DispatchQueue.main.async {
@@ -265,7 +257,7 @@ struct MermaidExpandedOverlay: View {
                     Divider()
 
                     // Interactive diagram - fills available space, auto-scaled to fit
-                    MermaidWebView(source: source, renderedHeight: $renderedHeight, hasError: $hasError, allowsInteraction: true, fitToWidth: true)
+                    MermaidWebView(source: source, renderedHeight: $renderedHeight, hasError: $hasError, allowsInteraction: true)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Color(nsColor: .textBackgroundColor))
                 }

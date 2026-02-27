@@ -10,7 +10,7 @@
             box-sizing: border-box;
         }
         html, body {
-            overflow: hidden;
+            overflow-x: hidden;
         }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -21,19 +21,17 @@
             padding: 8px;
         }
         #mermaid-container {
-            display: flex;
-            justify-content: center;
-            align-items: center;
             width: 100%;
             min-height: 100%;
         }
+        #diagram {
+            width: 100%;
+        }
         #mermaid-container svg {
+            width: 100%;
             max-width: 100%;
             height: auto;
-        }
-        .mermaid {
-            display: flex;
-            justify-content: center;
+            display: block;
         }
         /* Error styling */
         .error {
@@ -83,12 +81,26 @@
                 element.innerHTML = svg;
                 element.classList.remove('mermaid');
 
-                // Report size back to Swift
-                const rect = element.getBoundingClientRect();
-                window.webkit.messageHandlers.sizeReporter.postMessage({
-                    width: Math.ceil(rect.width),
-                    height: Math.ceil(rect.height),
-                    success: true
+                // Scale SVG to fill container width
+                const svgEl = element.querySelector('svg');
+                if (svgEl) {
+                    // Ensure viewBox exists for proper aspect-ratio scaling
+                    if (!svgEl.getAttribute('viewBox')) {
+                        const w = parseFloat(svgEl.getAttribute('width')) || svgEl.getBBox().width;
+                        const h = parseFloat(svgEl.getAttribute('height')) || svgEl.getBBox().height;
+                        svgEl.setAttribute('viewBox', `0 0 ${w} ${h}`);
+                    }
+                    // Remove fixed dimensions, let CSS handle scaling
+                    svgEl.removeAttribute('width');
+                    svgEl.removeAttribute('height');
+                    svgEl.style.width = '100%';
+                    svgEl.style.height = 'auto';
+                }
+
+                // Wait one frame for layout to settle, then report size
+                requestAnimationFrame(() => {
+                    reportSize(true);
+                    attachResizeObserver();
                 });
             } catch (error) {
                 const container = document.getElementById('mermaid-container');
@@ -101,6 +113,28 @@
                     error: error.message
                 });
             }
+        }
+
+        function reportSize(success) {
+            const element = document.getElementById('diagram');
+            if (!element) return;
+            const rect = element.getBoundingClientRect();
+            window.webkit.messageHandlers.sizeReporter.postMessage({
+                width: Math.ceil(rect.width),
+                height: Math.ceil(rect.height),
+                success: success
+            });
+        }
+
+        function attachResizeObserver() {
+            const container = document.getElementById('mermaid-container');
+            if (!container) return;
+            let debounceTimer = null;
+            const observer = new ResizeObserver(() => {
+                if (debounceTimer) clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => reportSize(true), 200);
+            });
+            observer.observe(container);
         }
 
         document.addEventListener('DOMContentLoaded', render);
