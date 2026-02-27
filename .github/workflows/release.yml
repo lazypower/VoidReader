@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-sign-release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: make project
+
+      - name: Import signing certificate
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          # Create a temporary keychain
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Import certificate
+          echo "$APPLE_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          # Allow codesign to access the keychain
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Add to search list
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+      - name: Build, sign, and notarize DMG
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APP_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: make dmg-signed
+
+      - name: Rename DMG for release
+        run: mv build/VoidReader.dmg "build/VoidReader_v${{ steps.version.outputs.VERSION }}.dmg"
+
+      - name: Compute SHA256
+        id: sha
+        run: |
+          SHA=$(shasum -a 256 "build/VoidReader_v${{ steps.version.outputs.VERSION }}.dmg" | awk '{print $1}')
+          echo "SHA256=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            "build/VoidReader_v${{ steps.version.outputs.VERSION }}.dmg" \
+            --title "VoidReader ${{ steps.version.outputs.VERSION }}" \
+            --generate-notes
+
+      - name: Update Homebrew cask
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          SHA256="${{ steps.sha.outputs.SHA256 }}"
+
+          # Clone the tap
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/lazypower/homebrew-tap.git" "$RUNNER_TEMP/homebrew-tap"
+          cd "$RUNNER_TEMP/homebrew-tap"
+
+          # Update the cask
+          cat > Casks/voidreader.rb <<'CASK'
+cask "voidreader" do
+  version "PLACEHOLDER_VERSION"
+  sha256 "PLACEHOLDER_SHA256"
+
+  url "https://github.com/lazypower/VoidReader/releases/download/v#{version}/VoidReader_v#{version}.dmg"
+  name "VoidReader"
+  desc "Native macOS markdown viewer with a reader-first philosophy"
+  homepage "https://github.com/lazypower/VoidReader"
+
+  depends_on macos: ">= :sonoma"
+
+  app "VoidReader.app"
+
+  zap trash: [
+    "~/Library/Preferences/com.voidreader.app.plist",
+    "~/Library/Application Support/VoidReader",
+  ]
+end
+CASK
+          sed -i '' "s/PLACEHOLDER_VERSION/${VERSION}/" Casks/voidreader.rb
+          sed -i '' "s/PLACEHOLDER_SHA256/${SHA256}/" Casks/voidreader.rb
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/voidreader.rb
+          git commit -m "Update voidreader to ${VERSION}"
+          git push

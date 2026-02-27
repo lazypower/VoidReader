@@ -54,6 +54,12 @@ VoidReader opens markdown files and shows them to you. That's it. That's the app
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew install --cask lazypower/tap/voidreader
+```
+
 ### Download
 Grab the latest DMG from [Releases](https://github.com/lazypower/void-reader/releases).
 
