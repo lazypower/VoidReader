@@ -88,29 +88,10 @@ jobs:
           git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/lazypower/homebrew-tap.git" "$RUNNER_TEMP/homebrew-tap"
           cd "$RUNNER_TEMP/homebrew-tap"
 
-          # Update the cask
-          cat > Casks/voidreader.rb <<'CASK'
-cask "voidreader" do
-  version "PLACEHOLDER_VERSION"
-  sha256 "PLACEHOLDER_SHA256"
-
-  url "https://github.com/lazypower/VoidReader/releases/download/v#{version}/VoidReader_v#{version}.dmg"
-  name "VoidReader"
-  desc "Native macOS markdown viewer with a reader-first philosophy"
-  homepage "https://github.com/lazypower/VoidReader"
-
-  depends_on macos: ">= :sonoma"
-
-  app "VoidReader.app"
-
-  zap trash: [
-    "~/Library/Preferences/com.voidreader.app.plist",
-    "~/Library/Application Support/VoidReader",
-  ]
-end
-CASK
-          sed -i '' "s/PLACEHOLDER_VERSION/${VERSION}/" Casks/voidreader.rb
-          sed -i '' "s/PLACEHOLDER_SHA256/${SHA256}/" Casks/voidreader.rb
+          # Update the cask from template
+          sed -e "s/CASK_VERSION/${VERSION}/" \
+              -e "s/CASK_SHA256/${SHA256}/" \
+              "$GITHUB_WORKSPACE/.github/cask-template.rb" > Casks/voidreader.rb
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
