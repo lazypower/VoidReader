@@ -43,6 +43,7 @@ struct StatusBarView: View {
                     icon: "book",
                     value: "\(percent)%"
                 )
+                .accessibilityIdentifier("percent-read")
             }
 
             Spacer()

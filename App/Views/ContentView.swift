@@ -53,6 +53,7 @@ struct ContentView: View {
     // Scroll position tracking
     @State private var scrollOffset: CGFloat = 0
     @State private var contentHeight: CGFloat = 0
+    @State private var visibleHeight: CGFloat = 0
     @State private var scrollProxy: ScrollViewProxy?
     @State private var savedScrollBlockIndex: Int?
     @State private var currentTopBlockIndex: Int = 0
@@ -886,12 +887,32 @@ struct ContentView: View {
                         .padding(fullWidthReader ? 24 : 40)
                         .frame(maxWidth: fullWidthReader ? .infinity : 720, alignment: .leading)
                     }
+                    .background(
+                        GeometryReader { contentGeo in
+                            Color.clear
+                                .onChange(of: contentGeo.size.height) { _, newHeight in
+                                    contentHeight = newHeight
+                                    updateScrollPercent(offset: scrollOffsetForPercent)
+                                }
+                                .onAppear {
+                                    contentHeight = contentGeo.size.height
+                                }
+                        }
+                    )
                 }
                 .coordinateSpace(name: "reader-scroll")
-                .onChange(of: renderedBlocks.count) { _, _ in
-                    // Recompute progress when blocks change (progressive rendering)
-                    updateScrollPercent(offset: scrollOffsetForPercent)
-                }
+                .overlay(
+                    GeometryReader { scrollGeo in
+                        Color.clear
+                            .onAppear {
+                                visibleHeight = scrollGeo.size.height
+                            }
+                            .onChange(of: scrollGeo.size.height) { _, newHeight in
+                                visibleHeight = newHeight
+                                updateScrollPercent(offset: scrollOffsetForPercent)
+                            }
+                    }
+                )
 
                 // Loading indicator for large documents
                 if isRendering {
@@ -984,28 +1005,19 @@ struct ContentView: View {
 
     /// Update scroll percentage based on scroll offset
     private func updateScrollPercent(offset: CGFloat) {
-        // Store offset for later recalculation when blocks change
+        // Store offset for later recalculation when dimensions change
         scrollOffsetForPercent = offset
 
         // Skip if in edit mode
         guard !isEditMode else { return }
 
-        // If no blocks yet, just show 0%
-        guard renderedBlocks.count > 0 else {
-            if displayedPercentRead != 0 {
-                displayedPercentRead = 0
-            }
-            return
-        }
+        let percent = ScrollPercentage.calculate(
+            offset: offset,
+            contentHeight: contentHeight,
+            visibleHeight: visibleHeight
+        )
 
-        // Estimate total content height
-        let estimatedBlockHeight: CGFloat = 60
-        let totalHeight = CGFloat(renderedBlocks.count) * estimatedBlockHeight
-
-        // Calculate percent (0-100)
-        let percent = Int(min(100, max(0, (offset / max(1, totalHeight)) * 100)))
-
-        // Only update if changed - this check plus @State debouncing prevents jitter
+        // Only update if changed
         if percent != displayedPercentRead {
             displayedPercentRead = percent
         }
