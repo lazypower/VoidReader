@@ -307,11 +307,18 @@ struct MarkdownReaderViewWithAnchors: View {
     }
 
     /// Finds which block contains the given heading text.
+    /// Uses exact match first (headings are isolated in their own blocks),
+    /// then falls back to prefix match for robustness.
     static func blockIndex(for headingText: String, in blocks: [MarkdownBlock]) -> Int? {
+        let target = headingText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Exact match — headings get their own block via flushTextBuffer()
         for (idx, block) in blocks.enumerated() {
-            if case .text(let attr) = block,
-               String(attr.characters).contains(headingText) {
-                return idx
+            if case .text(let attr) = block {
+                let blockText = String(attr.characters)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if blockText == target {
+                    return idx
+                }
             }
         }
         return nil

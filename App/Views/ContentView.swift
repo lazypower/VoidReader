@@ -884,6 +884,9 @@ struct ContentView: View {
                             onMermaidExpand: handleMermaidExpand
                         )
                         .environment(\.onImageExpand, handleImageExpand)
+                        .environment(\.openURL, OpenURLAction { url in
+                            return handleLinkClick(url)
+                        })
                         .padding(fullWidthReader ? 24 : 40)
                         .frame(maxWidth: fullWidthReader ? .infinity : 720, alignment: .leading)
                     }
@@ -1031,6 +1034,47 @@ struct ContentView: View {
         expandedImageData = imageData
     }
 
+    // MARK: - Link Handling
+
+    private func handleLinkClick(_ url: URL) -> OpenURLAction.Result {
+        // In-document anchor links (void-anchor:slug)
+        if url.scheme == "void-anchor" {
+            let targetSlug = url.absoluteString
+                .replacingOccurrences(of: "void-anchor:", with: "")
+                .removingPercentEncoding ?? ""
+            if let heading = headings.first(where: { $0.slug == targetSlug }) {
+                scrollToHeading(heading)
+            }
+            return .handled
+        }
+
+        // Relative file links (void-file:path) — resolve against current document
+        if url.scheme == "void-file" {
+            guard let docURL = fileURL else { return .discarded }
+            let relativePath = url.absoluteString
+                .replacingOccurrences(of: "void-file:", with: "")
+                .removingPercentEncoding ?? ""
+            let baseDir = docURL.deletingLastPathComponent()
+            let resolvedURL = baseDir.appendingPathComponent(relativePath).standardized
+
+            if FileManager.default.fileExists(atPath: resolvedURL.path) {
+                NSDocumentController.shared.openDocument(
+                    withContentsOf: resolvedURL,
+                    display: true
+                ) { _, _, error in
+                    if let error = error {
+                        DebugLog.error(.lifecycle, "Failed to open linked file: \(error.localizedDescription)")
+                    }
+                }
+                return .handled
+            }
+            return .discarded
+        }
+
+        // Everything else: let the system handle it (opens in browser, etc.)
+        return .systemAction
+    }
+
     // MARK: - Formatting
 
     private func formatDocument() {
@@ -1093,6 +1137,9 @@ struct ContentView: View {
                         onMermaidExpand: handleMermaidExpand
                     )
                     .environment(\.onImageExpand, handleImageExpand)
+                    .environment(\.openURL, OpenURLAction { url in
+                        return handleLinkClick(url)
+                    })
                     .padding(fullWidthReader ? 24 : 40)
                     .frame(maxWidth: fullWidthReader ? .infinity : 720, alignment: .leading)
                 }

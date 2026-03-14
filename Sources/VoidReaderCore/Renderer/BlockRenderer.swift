@@ -172,12 +172,15 @@ struct BlockWalker: MarkupWalker {
     }
 
     mutating func visitHeading(_ heading: Heading) {
-        addBlockSpacing()
+        // Flush so the heading gets its own block — enables scroll-to-heading
+        flushTextBuffer()
+        isFirstBlock = false
         headingLevel = heading.level
         for child in heading.children {
             visit(child)
         }
         headingLevel = nil
+        flushTextBuffer()
     }
 
     mutating func visitParagraph(_ paragraph: Paragraph) {
@@ -483,8 +486,26 @@ struct BlockWalker: MarkupWalker {
         var attrs = AttributeContainer()
         attrs.font = currentFont()
         attrs.foregroundColor = style.resolvedLinkColor
-        if let destination = link.destination, let url = URL(string: destination) {
-            attrs.link = url
+        if let destination = link.destination {
+            if destination.hasPrefix("#") {
+                // In-document anchor link → custom scheme for interception
+                let fragment = String(destination.dropFirst())
+                let slug = HeadingInfo.slug(from: fragment)
+                if let url = URL(string: "void-anchor:\(slug)") {
+                    attrs.link = url
+                }
+            } else if destination.contains("://") || destination.hasPrefix("mailto:") {
+                // Absolute URL — pass through as-is
+                if let url = URL(string: destination) {
+                    attrs.link = url
+                }
+            } else {
+                // Relative path — wrap in custom scheme so OpenURLAction can intercept
+                let encoded = destination.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? destination
+                if let url = URL(string: "void-file:\(encoded)") {
+                    attrs.link = url
+                }
+            }
         }
 
         for child in link.children {

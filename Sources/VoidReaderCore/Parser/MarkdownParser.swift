@@ -47,9 +47,24 @@ public struct HeadingInfo: Identifiable {
     public let level: Int
     public let text: String
 
+    /// GitHub-style anchor slug for in-document linking.
+    /// e.g. "My Section (v2)" → "my-section-v2"
+    public var slug: String {
+        text.lowercased()
+            .replacingOccurrences(of: " ", with: "-")
+            .filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+    }
+
     public init(level: Int, text: String) {
         self.level = level
         self.text = text
+    }
+
+    /// Generates a slug from arbitrary heading text (static version for link resolution).
+    public static func slug(from text: String) -> String {
+        text.lowercased()
+            .replacingOccurrences(of: " ", with: "-")
+            .filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
     }
 }
 
