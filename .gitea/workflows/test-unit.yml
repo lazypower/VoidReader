@@ -1,0 +1,23 @@
+name: Unit Tests
+
+on: [push, pull_request]
+
+jobs:
+  xcode-test:
+    name: Xcode Unit Tests
+    runs-on: apple
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Xcode project
+        run: make project
+
+      - name: Run package tests
+        run: swift test
+
+      - name: Run Xcode unit tests
+        run: |
+          xcodebuild -scheme VoidReader -configuration Debug \
+            test -only-testing:VoidReaderTests \
+            -resultBundlePath TestResults/unit.xcresult \
+            -quiet
