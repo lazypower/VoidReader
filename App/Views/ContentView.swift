@@ -155,6 +155,12 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: expandedMermaidSource != nil || expandedImageData != nil)
+        .overlay(alignment: .topLeading) {
+            // Frame drop monitor for XCUITest performance tests (debug only)
+            if ProcessInfo.processInfo.environment["VOID_READER_DEBUG"] != nil {
+                FrameDropOverlay()
+            }
+        }
         .cheatSheetOnHold(isShowing: $showCheatSheet)
         .onAppear {
             DebugLog.info(.lifecycle, "ContentView.onAppear - \(fileURL?.lastPathComponent ?? "untitled") (\(document.text.count) chars)")

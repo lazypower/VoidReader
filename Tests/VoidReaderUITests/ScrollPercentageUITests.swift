@@ -30,13 +30,26 @@ final class ScrollPercentageUITests: VoidReaderUITestCase {
         // Wait for async renders (Mermaid WKWebViews, KaTeX)
         sleep(5)
 
+        // Close any extra "Untitled" windows left by DocumentGroup's default new doc
+        let windowCount = app.windows.count
+        if windowCount > 1 {
+            for i in (0..<windowCount).reversed() {
+                let w = app.windows.element(boundBy: i)
+                if let title = w.title as String?, title.hasPrefix("Untitled") {
+                    w.click()
+                    app.typeKey("w", modifierFlags: .command)
+                    usleep(300_000)
+                }
+            }
+        }
+
         // Click the content area to give the scroll view keyboard focus
         let scrollArea = app.scrollViews.firstMatch
         if scrollArea.waitForExistence(timeout: 5) {
             scrollArea.click()
         } else {
             // Fallback: click center of window
-            window.click()
+            app.windows.firstMatch.click()
         }
         usleep(300_000)
     }
@@ -44,7 +57,7 @@ final class ScrollPercentageUITests: VoidReaderUITestCase {
     /// Read the current percent from the status bar via the "percent-read"
     /// accessibility identifier. The value is exposed as "N%" in the element's value.
     private func readPercentRead() -> Int? {
-        let element = app.staticTexts["percent-read"]
+        let element = app.staticTexts.matching(identifier: "percent-read").firstMatch
         guard element.waitForExistence(timeout: 5) else { return nil }
 
         // Value is "0%", "42%", "100%", etc.

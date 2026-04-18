@@ -23,6 +23,9 @@ class VoidReaderUITestCase: XCTestCase {
 
         app = XCUIApplication()
 
+        // Suppress macOS window state restoration between test runs
+        app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]
+
         // Enable debug telemetry
         app.launchEnvironment["VOID_READER_DEBUG"] = "1"
 

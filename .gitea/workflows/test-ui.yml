@@ -24,4 +24,5 @@ jobs:
         run: |
           xcodebuild -scheme VoidReader -configuration Debug \
             test -only-testing:VoidReaderUITests/LargeDocumentTests \
+            -only-testing:VoidReaderUITests/ScrollPercentageUITests \
             -resultBundlePath TestResults/ui.xcresult
