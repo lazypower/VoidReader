@@ -1,7 +1,7 @@
 # VoidReader Makefile
 # Run `make help` for available commands
 
-.PHONY: help project build run run-debug test test-ui test-ui-debug clean format lint xcode setup install dmg dmg-signed staple
+.PHONY: help project build run run-debug test test-ui test-ui-debug clean format lint xcode setup install dmg dmg-signed staple profile
 
 # Default target
 help:
@@ -13,6 +13,10 @@ help:
 	@echo "  make run          - Build and run the app"
 	@echo "  make run-debug    - Run with debug telemetry (VOID_READER_DEBUG=1)"
 	@echo "  make run-debug-file - Run with debug telemetry + file logging"
+	@echo ""
+	@echo "Profiling:"
+	@echo "  make profile      - Build Debug and open Instruments with VoidReader as target"
+	@echo "                      (FILE=path/to/doc.md to auto-open a document at launch)"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test         - Run unit tests"
@@ -86,6 +90,38 @@ run-debug: build
 	@VOID_READER_DEBUG=1 open "$$(xcodebuild -scheme VoidReader -configuration Debug -showBuildSettings | grep -m 1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/VoidReader.app"
 	@echo ""
 	@echo "View logs in Console.app with filter: subsystem:com.voidreader.debug"
+
+# Open Instruments with VoidReader preloaded as the recording target.
+# Usage:
+#   make profile               # interactive: pick template in Instruments, hit record
+#   make profile FILE=doc.md   # auto-launch with a document open (uses xctrace Time Profiler)
+#
+# Signposts emitted by the app appear under "os_signpost" / "Points of Interest"
+# in any template that includes the os_signpost instrument (Time Profiler,
+# Animation Hitches, Allocations, etc.). See DEVELOPMENT.md "Profiling" section
+# for full runbooks.
+profile: build
+	@APP_PATH="$$(xcodebuild -scheme VoidReader -configuration Debug -showBuildSettings | grep -m 1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/VoidReader.app"; \
+	if [ -n "$(FILE)" ]; then \
+		ABS_FILE="$$(cd "$$(dirname "$(FILE)")" && pwd)/$$(basename "$(FILE)")"; \
+		echo "Profiling with document: $$ABS_FILE"; \
+		echo "Recording with Time Profiler template (xctrace headless)..."; \
+		mkdir -p build/traces; \
+		TRACE_OUT="build/traces/voidreader-$$(date +%Y%m%d-%H%M%S).trace"; \
+		xcrun xctrace record \
+			--template 'Time Profiler' \
+			--output "$$TRACE_OUT" \
+			--launch -- "$$APP_PATH/Contents/MacOS/VoidReader" "$$ABS_FILE"; \
+		echo ""; \
+		echo "✓ Trace recorded: $$TRACE_OUT"; \
+		echo "  Open with: open $$TRACE_OUT"; \
+	else \
+		echo "Opening Instruments with VoidReader as target..."; \
+		echo "  → Pick a template (Time Profiler, Animation Hitches, Allocations)"; \
+		echo "  → Press Record (⌘R), then drive the app"; \
+		echo "  → Signposts appear under 'os_signpost' / 'Points of Interest'"; \
+		open -a Instruments "$$APP_PATH"; \
+	fi
 
 # Run with debug telemetry and file logging
 run-debug-file: build

@@ -35,7 +35,7 @@
 
 ### 3. Developer Workflow
 
-- [ ] 3.1 Add `make profile` target that launches Xcode's Profile action against the debug scheme (or `open -a Instruments` with a sensible template)
+- [x] 3.1 Add `make profile` target that launches Xcode's Profile action against the debug scheme (or `open -a Instruments` with a sensible template) — implemented as two-mode target: bare `make profile` opens Instruments interactively with VoidReader preloaded as the recording target (user picks template); `make profile FILE=path/to/doc.md` runs `xctrace record --template 'Time Profiler' --launch` headlessly and writes a timestamped trace to `build/traces/`. Headless mode is the reproducible-workload path needed for §6 later. Help text added under a new "Profiling" section.
 - [ ] 3.2 Extend `DEVELOPMENT.md` with a new "Profiling" section containing three runbooks:
   - [ ] 3.2.1 "Profiling scroll jank" — open torture_100k_code.md, use Animation Hitches template, interpret output
   - [ ] 3.2.2 "Profiling cold open" — launch with a large doc via `--open` argument, use Time Profiler, locate slow intervals
