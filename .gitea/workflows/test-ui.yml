@@ -35,7 +35,11 @@ jobs:
 
       - name: Run UI tests
         run: |
-          launchctl asuser $(id -u) xcodebuild -scheme VoidReader -configuration Debug \
-            test -only-testing:VoidReaderUITests \
-            -resultBundlePath TestResults/ui.xcresult \
-            -quiet
+          # Get the security session ID from the GUI login session
+          GUI_SESSION=$(launchctl asuser $(id -u) launchctl getenv SECURITYSESSIONID 2>/dev/null || \
+            ps -eo pid,comm | grep -m1 Finder | awk '{print $1}' | xargs -I{} /bin/launchctl procinfo {} 2>/dev/null | grep session || true)
+
+          # Run xcodebuild via osascript to inherit the full GUI session
+          osascript -e "
+            do shell script \"cd $GITHUB_WORKSPACE && xcodebuild -scheme VoidReader -configuration Debug test -only-testing:VoidReaderUITests -resultBundlePath TestResults/ui.xcresult -quiet 2>&1\"
+          "
