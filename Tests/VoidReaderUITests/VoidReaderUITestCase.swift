@@ -42,42 +42,30 @@ class VoidReaderUITestCase: XCTestCase {
 
     // MARK: - Helpers
 
-    /// Launch app and open a document at the given path
+    /// Launch app and open a document at the given path.
+    ///
+    /// Uses `/usr/bin/open -a VoidReader <path>` which routes through Launch
+    /// Services. This avoids the AppleEvents -600 ("Application isn't running")
+    /// errors we hit on Firecracker runners, where NSAppleEventManager
+    /// registration is unreliable shortly after `app.launch()` returns.
     func launchAndOpen(documentPath: String) {
         app.launch()
 
-        // Use AppleScript to open the file (more reliable than UI automation).
-        // Retry until success: app.launch() returns when XCUI sees the app, but
-        // NSAppleEventManager may not be registered yet, causing -600 errors.
-        let script = """
-        tell application "VoidReader"
-            activate
-            open POSIX file "\(documentPath)"
-        end tell
-        """
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-a", "VoidReader", documentPath]
+        let errPipe = Pipe()
+        process.standardError = errPipe
+        try? process.run()
+        process.waitUntilExit()
 
-        let deadline = Date().addingTimeInterval(15)
-        var lastStatus: Int32 = -1
-        var lastErr = ""
-        while Date() < deadline {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-            process.arguments = ["-e", script]
-            let errPipe = Pipe()
-            process.standardError = errPipe
-            try? process.run()
-            process.waitUntilExit()
-            lastStatus = process.terminationStatus
-            if lastStatus == 0 { break }
-            lastErr = String(
-                data: errPipe.fileHandleForReading.readDataToEndOfFile(),
-                encoding: .utf8
-            ) ?? ""
-            usleep(500_000) // 500ms before retry
-        }
+        let stderr = String(
+            data: errPipe.fileHandleForReading.readDataToEndOfFile(),
+            encoding: .utf8
+        ) ?? ""
         XCTAssertEqual(
-            lastStatus, 0,
-            "AppleScript open failed after retries. Last error: \(lastErr)"
+            process.terminationStatus, 0,
+            "`open -a VoidReader` failed. stderr: \(stderr)"
         )
 
         // Wait for the document to load
