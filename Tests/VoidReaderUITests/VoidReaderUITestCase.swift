@@ -46,7 +46,9 @@ class VoidReaderUITestCase: XCTestCase {
     func launchAndOpen(documentPath: String) {
         app.launch()
 
-        // Use AppleScript to open the file (more reliable than UI automation)
+        // Use AppleScript to open the file (more reliable than UI automation).
+        // Retry until success: app.launch() returns when XCUI sees the app, but
+        // NSAppleEventManager may not be registered yet, causing -600 errors.
         let script = """
         tell application "VoidReader"
             activate
@@ -54,11 +56,29 @@ class VoidReaderUITestCase: XCTestCase {
         end tell
         """
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
-        try? process.run()
-        process.waitUntilExit()
+        let deadline = Date().addingTimeInterval(15)
+        var lastStatus: Int32 = -1
+        var lastErr = ""
+        while Date() < deadline {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            process.arguments = ["-e", script]
+            let errPipe = Pipe()
+            process.standardError = errPipe
+            try? process.run()
+            process.waitUntilExit()
+            lastStatus = process.terminationStatus
+            if lastStatus == 0 { break }
+            lastErr = String(
+                data: errPipe.fileHandleForReading.readDataToEndOfFile(),
+                encoding: .utf8
+            ) ?? ""
+            usleep(500_000) // 500ms before retry
+        }
+        XCTAssertEqual(
+            lastStatus, 0,
+            "AppleScript open failed after retries. Last error: \(lastErr)"
+        )
 
         // Wait for the document to load
         sleep(3) // Give time for document to open and render
