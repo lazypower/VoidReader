@@ -21,18 +21,6 @@ class VoidReaderUITestCase: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
 
-        // Kill any stale VoidReader instances from prior test runs.
-        // `open -a` attaches to an already-running app, so without this the
-        // test's `app.launch()` may resolve to a leftover process with stale
-        // window state (e.g. an open panel intercepting `app.scrollViews`).
-        let killer = Process()
-        killer.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
-        killer.arguments = ["VoidReader"]
-        killer.standardError = Pipe()  // swallow "No matching processes"
-        try? killer.run()
-        killer.waitUntilExit()
-        usleep(500_000)
-
         app = XCUIApplication()
 
         // Suppress macOS window state restoration between test runs

@@ -27,35 +27,29 @@ final class ScrollPercentageUITests: VoidReaderUITestCase {
         // (launchAndOpen already sleeps 3s; mixed-content needs a little more).
         sleep(2)
 
-        // DocumentGroup may have shown its "no document" open panel before
-        // `open -a` delivered the doc. Dismiss it with Escape — harmless if
-        // no panel is showing.
-        app.typeKey(.escape, modifierFlags: [])
-        usleep(300_000)
+        // Wait for the reader scroll view to render. This is identified by
+        // the "reader-view" accessibility identifier on ContentView's
+        // ScrollView (App/Views/ContentView.swift). Targeting by identifier
+        // avoids confusion with any other ScrollView in the hierarchy
+        // (e.g. an NSOpenPanel sidebar if DocumentGroup ever falls back to
+        // the chooser).
+        let scrollArea = app.scrollViews["reader-view"]
+        let appeared = scrollArea.waitForExistence(timeout: 15)
 
-        // Close any extra "Untitled" windows DocumentGroup may have created
-        // before the fixture opened.
-        let windowCount = app.windows.count
-        if windowCount > 1 {
-            for i in (0..<windowCount).reversed() {
-                let w = app.windows.element(boundBy: i)
-                if let title = w.title as String?, title.hasPrefix("Untitled") {
-                    w.click()
-                    app.typeKey("w", modifierFlags: .command)
-                    usleep(300_000)
-                }
+        if !appeared {
+            // Diagnostic: dump window titles so future failures are easier
+            // to triage. Don't fail here — let the test's first interaction
+            // produce the actual error.
+            let titles = (0..<app.windows.count).map {
+                app.windows.element(boundBy: $0).title
             }
+            NSLog("[ScrollPercentageUITests] reader-view didn't appear; windows=\(titles)")
         }
 
-        // Click the reader scroll view (by accessibility identifier) to give
-        // it keyboard focus. `firstMatch` is unreliable here — it sometimes
-        // resolves to the open panel's sidebar ScrollView before the panel
-        // is dismissed.
-        let scrollArea = app.scrollViews["reader-view"]
-        if scrollArea.waitForExistence(timeout: 5) {
+        // Click to give keyboard focus.
+        if scrollArea.exists {
             scrollArea.click()
         } else {
-            // Fallback: click center of the document window
             app.windows.firstMatch.click()
         }
         usleep(300_000)
