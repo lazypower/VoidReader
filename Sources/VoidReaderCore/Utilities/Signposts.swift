@@ -8,17 +8,20 @@ import os.signpost
 /// (Console.app) and `FrameDropMonitor` (in-app overlay). See
 /// `openspec/changes/add-performance-instrumentation/design.md` for the boundaries.
 ///
-/// ## Subsystem Layout
+/// ## Subsystem & Category Layout
 /// Each `SignpostCategory` gets its own `OSSignposter` with a stable subsystem identifier of the
 /// form `place.wabash.VoidReader.<category>`. This namespace is intentionally distinct from
 /// `DebugLog`'s `com.voidreader.debug.*` so Instruments' subsystem filter can isolate signposts
 /// cleanly without pulling in DebugLog noise.
 ///
-/// All signposters use the OSLog category `"PointsOfInterest"` (Apple's well-known constant)
-/// so the built-in Instruments **Points of Interest** instrument picks them up automatically.
-/// Per-domain grouping is preserved through the *subsystem*, not the category — filter the
-/// Instruments detail pane by subsystem (`place.wabash.VoidReader.rendering`, etc.) to isolate
-/// one domain.
+/// The OSLog *category* matches the subsystem suffix (`rendering`, `lifecycle`, …) — these end
+/// up grouping signposts in Instruments' os_signpost summary view. We deliberately do NOT use
+/// the `"PointsOfInterest"` category: the built-in Points of Interest instrument has a hardcoded
+/// subsystem allowlist (only `com.apple.neappprivacy` and a handful of Apple subsystems are
+/// permitted to render in that lane), so routing our signposts there causes them to vanish from
+/// both the POI lane *and* the generic os_signpost lane (which filters POI out). This was
+/// learned empirically during the first profile run — see `make profile` in the Makefile, which
+/// adds the `os_signpost` instrument explicitly so per-domain categories surface in the trace.
 ///
 /// ## Zero-Overhead Contract
 /// `OSSignposter` is designed to be effectively free when Instruments is not recording. Hot-loop
@@ -50,27 +53,21 @@ public enum Signposts {
     public static let mermaidSubsystem = "place.wabash.VoidReader.mermaid"
     public static let imageSubsystem = "place.wabash.VoidReader.image"
 
-    /// OSLog category used by every VoidReader signposter. Apple's Points of Interest
-    /// instrument filters on this exact string — using a per-domain category here causes
-    /// signposts to vanish from the built-in lane (we hit this in the first profile run).
-    /// Per-domain grouping is carried by the *subsystem* identifier instead.
-    public static let pointsOfInterestCategory = "PointsOfInterest"
-
     /// Signposter for the markdown rendering pipeline (`parseMarkdown`, `renderBatch`,
     /// `firstPaint`, `syntaxHighlightPass`).
-    public static let rendering = OSSignposter(subsystem: renderingSubsystem, category: pointsOfInterestCategory)
+    public static let rendering = OSSignposter(subsystem: renderingSubsystem, category: "rendering")
 
     /// Signposter for document lifecycle (`openDocument`, `closeDocument`, `reloadFromDisk`).
-    public static let lifecycle = OSSignposter(subsystem: lifecycleSubsystem, category: pointsOfInterestCategory)
+    public static let lifecycle = OSSignposter(subsystem: lifecycleSubsystem, category: "lifecycle")
 
     /// Signposter for scroll-loop signals (`scrollTick` event).
-    public static let scroll = OSSignposter(subsystem: scrollSubsystem, category: pointsOfInterestCategory)
+    public static let scroll = OSSignposter(subsystem: scrollSubsystem, category: "scroll")
 
     /// Signposter for mermaid diagram rendering (`mermaidRender`).
-    public static let mermaid = OSSignposter(subsystem: mermaidSubsystem, category: pointsOfInterestCategory)
+    public static let mermaid = OSSignposter(subsystem: mermaidSubsystem, category: "mermaid")
 
     /// Signposter for image loading (`imageLoad`).
-    public static let image = OSSignposter(subsystem: imageSubsystem, category: pointsOfInterestCategory)
+    public static let image = OSSignposter(subsystem: imageSubsystem, category: "image")
 
     // MARK: - Convenience API
 

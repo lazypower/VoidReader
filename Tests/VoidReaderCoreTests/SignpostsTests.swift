@@ -28,14 +28,6 @@ struct SignpostsTests {
         #expect(Signposts.imageSubsystem == "place.wabash.VoidReader.image")
     }
 
-    @Test("OSLog category is the well-known PointsOfInterest constant")
-    func categoryIsPointsOfInterest() {
-        // Apple's built-in "Points of Interest" instrument filters on this exact string.
-        // We learned this the hard way during the first profile run — a per-domain category
-        // makes the lane render "No Data". Any change here MUST be paired with a confirmed
-        // alternative discovery path in Instruments.
-        #expect(Signposts.pointsOfInterestCategory == "PointsOfInterest")
-    }
 
     @Test("interval returns the block's value")
     func intervalReturnsBlockValue() {
