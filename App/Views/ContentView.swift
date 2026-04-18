@@ -164,6 +164,19 @@ struct ContentView: View {
         }
         .cheatSheetOnHold(isShowing: $showCheatSheet)
         .onAppear {
+            // Signpost: openDocument interval — spans the .onAppear setup work.
+            // Ends after the initial render handoff (sync path returns or progressive path
+            // assigns initialBlocks); see Signposts.lifecycle docstring for boundaries.
+            let signposter = Signposts.signposter(for: .lifecycle)
+            let bytes = document.text.utf8.count
+            let ext = fileURL?.pathExtension ?? ""
+            let state = signposter.beginInterval(
+                "openDocument",
+                id: signposter.makeSignpostID(),
+                "bytes=\(bytes) ext=\(ext)"
+            )
+            defer { signposter.endInterval("openDocument", state) }
+
             DebugLog.info(.lifecycle, "ContentView.onAppear - \(fileURL?.lastPathComponent ?? "untitled") (\(document.text.count) chars)")
             DebugLog.logMemory(.lifecycle, context: "Document open")
             setupDebouncing()
@@ -180,7 +193,9 @@ struct ContentView: View {
             lintUpdatePublisher.send(newValue)
         }
         .onDisappear {
-            fileWatcher?.stop()
+            Signposts.interval("closeDocument", category: .lifecycle) {
+                fileWatcher?.stop()
+            }
         }
         .alert("File Changed", isPresented: $showExternalChangeAlert) {
             Button("Reload") { reloadFromDisk() }
@@ -827,6 +842,12 @@ struct ContentView: View {
 
     private func reloadFromDisk() {
         guard let url = fileURL else { return }
+
+        // Signpost is placed after the early-return guard so a 0-duration "no fileURL" case
+        // doesn't pollute the trace — only real reload work shows up on the timeline.
+        let signposter = Signposts.signposter(for: .lifecycle)
+        let state = signposter.beginInterval("reloadFromDisk")
+        defer { signposter.endInterval("reloadFromDisk", state) }
 
         // Prefer NSDocument.revert so the reload does not mark the document dirty.
         // SwiftUI's DocumentGroup owns an NSDocument under the hood; revert re-reads

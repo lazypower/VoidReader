@@ -17,10 +17,10 @@
 
 ### 2. Phase A Instrumentation
 
-- [ ] 2.1 Lifecycle signposts
-  - [ ] 2.1.1 Wrap document open path with `openDocument` interval; attach metadata (file size, extension)
-  - [ ] 2.1.2 Wrap document close path with `closeDocument` interval
-  - [ ] 2.1.3 Wrap `reloadFromDisk()` with `reloadFromDisk` interval
+- [x] 2.1 Lifecycle signposts
+  - [x] 2.1.1 Wrap document open path with `openDocument` interval; attach metadata (file size, extension) — wired into ContentView's `.onAppear` (the natural document-open boundary for SwiftUI's `DocumentGroup`); metadata uses `OSLogMessage` interpolation via `Signposts.signposter(for:)` so it stays lazy when not recording
+  - [x] 2.1.2 Wrap document close path with `closeDocument` interval — wired into `.onDisappear`
+  - [x] 2.1.3 Wrap `reloadFromDisk()` with `reloadFromDisk` interval — placed after the `guard let url = fileURL` so 0-duration no-op cases don't pollute the trace
 
 - [ ] 2.2 Rendering signposts
   - [ ] 2.2.1 Wrap `BlockRenderer.render()` with `parseMarkdown` interval; attach metadata (input bytes, produced-node count)
