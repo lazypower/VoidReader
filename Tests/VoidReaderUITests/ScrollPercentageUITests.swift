@@ -19,21 +19,17 @@ final class ScrollPercentageUITests: VoidReaderUITestCase {
         .appendingPathComponent("Fixtures/mixed-content-scroll.md")
         .path
 
-    /// Launch the app with the mixed-content test document via --open argument.
+    /// Launch the app and open the mixed-content test document via the canonical
+    /// DocumentGroup open path (osascript `open POSIX file ...`).
     private func launchWithMixedContent() {
-        app.launchArguments += ["--open", Self.mixedContentPath]
-        app.launch()
+        launchAndOpen(documentPath: Self.mixedContentPath)
 
-        let window = app.windows.firstMatch
-        XCTAssertTrue(
-            window.waitForExistence(timeout: 15),
-            "Window should appear after opening test document"
-        )
+        // Extra settle time for async Mermaid WKWebViews and KaTeX renders
+        // (launchAndOpen already sleeps 3s; mixed-content needs a little more).
+        sleep(2)
 
-        // Wait for async renders (Mermaid WKWebViews, KaTeX)
-        sleep(5)
-
-        // Close any extra "Untitled" windows left by DocumentGroup's default new doc
+        // Close any extra "Untitled" windows DocumentGroup may have created
+        // before the fixture opened via AppleEvent.
         let windowCount = app.windows.count
         if windowCount > 1 {
             for i in (0..<windowCount).reversed() {
