@@ -76,6 +76,10 @@ struct ContentView: View {
     @State private var renderedBlocks: [MarkdownBlock] = []
     @State private var isRendering = false
     @State private var renderTask: Task<Void, Never>?
+    /// Guard for the `firstPaint` signpost event so it fires exactly once per
+    /// document-open lifecycle. Reset to false in `reloadFromDisk()` so the next paint
+    /// after a reload re-fires it (paired with the `reloadFromDisk` interval).
+    @State private var firstPaintFired = false
 
     // Lint warnings
     @State private var lintWarnings: [LintWarning] = []
@@ -524,10 +528,24 @@ struct ContentView: View {
         // Cancel any in-progress render
         renderTask?.cancel()
 
+        let renderingSignposter = Signposts.signposter(for: .rendering)
+
         // For small documents, render synchronously to avoid flicker
         if text.count < 50_000 {
             DebugLog.log(.rendering, "updateRenderedBlocks: sync path (\(text.count) chars)")
-            renderedBlocks = BlockRenderer.render(text, style: renderStyle)
+
+            // Signpost: renderBatch index=0 — sync path is one batch covering the full doc.
+            // parseMarkdown nests inside this interval (BlockRenderer.render emits it).
+            let state = renderingSignposter.beginInterval(
+                "renderBatch",
+                id: renderingSignposter.makeSignpostID(),
+                "index=0 mode=sync"
+            )
+            let blocks = BlockRenderer.render(text, style: renderStyle)
+            renderingSignposter.endInterval("renderBatch", state, "blocks=\(blocks.count)")
+
+            renderedBlocks = blocks
+            emitFirstPaintIfNeeded(blockCount: blocks.count)
             return
         }
 
@@ -543,10 +561,19 @@ struct ContentView: View {
         let firstChunkEnd = findFirstChunkEnd(in: text)
         let firstChunk = String(text.prefix(firstChunkEnd))
 
+        // Signpost: renderBatch index=0 — initial progressive chunk.
+        let initialState = renderingSignposter.beginInterval(
+            "renderBatch",
+            id: renderingSignposter.makeSignpostID(),
+            "index=0 mode=initial"
+        )
         let initialBlocks = DebugLog.measure(.rendering, "Initial chunk (\(firstChunk.count) chars)") {
             BlockRenderer.render(firstChunk, style: style)
         }
+        renderingSignposter.endInterval("renderBatch", initialState, "blocks=\(initialBlocks.count)")
+
         renderedBlocks = initialBlocks
+        emitFirstPaintIfNeeded(blockCount: initialBlocks.count)
         DebugLog.log(.rendering, "  → Initial \(initialBlocks.count) blocks shown immediately")
 
         // If we rendered everything in the first chunk, we're done
@@ -560,13 +587,25 @@ struct ContentView: View {
         let remainingText = String(text.dropFirst(firstChunkEnd))
 
         renderTask = Task {
+            // Signpost: renderBatch index=1 — background continuation. The interval spans the
+            // detached parse + the main-actor append so the trace shows the full latency from
+            // "background work started" to "blocks visible".
+            let bgState = renderingSignposter.beginInterval(
+                "renderBatch",
+                id: renderingSignposter.makeSignpostID(),
+                "index=1 mode=background"
+            )
+
             let moreBlocks = await DebugLog.measureAsync(.rendering, "Background render (\(remainingText.count) chars)") {
                 await Task.detached(priority: .userInitiated) {
                     BlockRenderer.render(remainingText, style: style)
                 }.value
             }
 
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                renderingSignposter.endInterval("renderBatch", bgState, "blocks=0 cancelled=1")
+                return
+            }
 
             await MainActor.run {
                 DebugLog.log(.rendering, "Appending \(moreBlocks.count) blocks...")
@@ -577,8 +616,19 @@ struct ContentView: View {
                 DebugLog.log(.rendering, "  → Total \(renderedBlocks.count) blocks")
                 isRendering = false
                 DebugLog.logMemory(.perf, context: "After render complete")
+                renderingSignposter.endInterval("renderBatch", bgState, "blocks=\(moreBlocks.count)")
             }
         }
+    }
+
+    /// Emit the `firstPaint` signpost event once per document-open lifecycle. Called after the
+    /// first non-empty `renderedBlocks` assignment. The actual on-screen paint follows the
+    /// state mutation by ~1 SwiftUI frame; this is the closest hook without coupling into
+    /// LazyVStack's child lifecycle.
+    private func emitFirstPaintIfNeeded(blockCount: Int) {
+        guard !firstPaintFired, blockCount > 0 else { return }
+        firstPaintFired = true
+        Signposts.event("firstPaint", category: .rendering)
     }
 
     /// Find the end of the first chunk - targets ~20KB or ~500 lines, whichever comes first.
@@ -848,6 +898,10 @@ struct ContentView: View {
         let signposter = Signposts.signposter(for: .lifecycle)
         let state = signposter.beginInterval("reloadFromDisk")
         defer { signposter.endInterval("reloadFromDisk", state) }
+
+        // Reset firstPaint guard so the post-reload render emits a fresh `firstPaint` event,
+        // paired with this `reloadFromDisk` interval per design.md.
+        firstPaintFired = false
 
         // Prefer NSDocument.revert so the reload does not mark the document dirty.
         // SwiftUI's DocumentGroup owns an NSDocument under the hood; revert re-reads

@@ -22,11 +22,11 @@
   - [x] 2.1.2 Wrap document close path with `closeDocument` interval — wired into `.onDisappear`
   - [x] 2.1.3 Wrap `reloadFromDisk()` with `reloadFromDisk` interval — placed after the `guard let url = fileURL` so 0-duration no-op cases don't pollute the trace
 
-- [ ] 2.2 Rendering signposts
-  - [ ] 2.2.1 Wrap `BlockRenderer.render()` with `parseMarkdown` interval; attach metadata (input bytes, produced-node count)
-  - [ ] 2.2.2 Wrap `MarkdownRenderer` output generation with `renderBatch` interval; attach metadata (batch index, block count)
-  - [ ] 2.2.3 Emit `firstPaint` event when the first batch of document-body blocks becomes visible — exclude placeholder/skeleton states per design.md definition
-  - [ ] 2.2.4 Wrap syntax highlight pass with `syntaxHighlightPass` interval
+- [x] 2.2 Rendering signposts
+  - [x] 2.2.1 Wrap `BlockRenderer.render()` with `parseMarkdown` interval; attach metadata (input bytes, produced-node count) — bytes go on `beginInterval`, node count on `endInterval` (only known after the walk)
+  - [x] 2.2.2 Wrap `MarkdownRenderer` output generation with `renderBatch` interval; attach metadata (batch index, block count) — instrumented in `ContentView.updateRenderedBlocks` (the actual batching site, despite the proposal naming `MarkdownRenderer`); sync path = 1 batch (`index=0 mode=sync`), progressive path = 2 batches (`mode=initial`, `mode=background`); cancellation path emits `cancelled=1`
+  - [x] 2.2.3 Emit `firstPaint` event when the first batch of document-body blocks becomes visible — guarded by `@State firstPaintFired`; reset to `false` in `reloadFromDisk` so a reload re-emits paired with the new `reloadFromDisk` interval; fires on first non-empty `renderedBlocks` assignment (~1 SwiftUI frame before actual on-screen paint — closest hook without coupling into LazyVStack child lifecycle)
+  - [x] 2.2.4 Wrap syntax highlight pass with `syntaxHighlightPass` interval — single interval covering both visible-region and full-document paths, distinguished by `mode=visible|full` metadata
 
 - [ ] 2.3 Subsystem signposts
   - [ ] 2.3.1 Wrap `MermaidImageRenderer.renderAll` with `mermaidRender` interval; attach metadata (diagram count)
