@@ -22,7 +22,7 @@ jobs:
 
       - name: Run UI tests
         run: |
-          xcodebuild -scheme VoidReader -configuration Debug \
+          launchctl asuser $(id -u) xcodebuild -scheme VoidReader -configuration Debug \
             test -only-testing:VoidReaderUITests \
             -resultBundlePath TestResults/ui.xcresult \
             -quiet
