@@ -138,6 +138,46 @@ class VoidReaderUITestCase: XCTestCase {
         return try? String(contentsOfFile: logPath, encoding: .utf8)
     }
 
+    /// Dump the full XCUITest view of the app to NSLog. Call from any
+    /// test diagnostic path — output lands in xcodebuild stderr, which
+    /// CI captures and `tea actions runs logs` returns.
+    ///
+    /// Includes window titles + frames, the full element tree, and a
+    /// flat list of every accessibility identifier present.
+    func dumpAccessibilityState(label: String) {
+        var report = "\n========== XCUITest dump: \(label) ==========\n"
+
+        // Window summary
+        let windowCount = app.windows.count
+        report += "Windows: \(windowCount)\n"
+        for i in 0..<windowCount {
+            let w = app.windows.element(boundBy: i)
+            report += "  [\(i)] title=\(w.title.debugDescription) frame=\(w.frame)\n"
+        }
+
+        // All identifiers present anywhere in the hierarchy
+        let allElements = app.descendants(matching: .any).allElementsBoundByIndex
+        let identifiers = allElements
+            .map { $0.identifier }
+            .filter { !$0.isEmpty }
+        report += "\nIdentifiers present (\(identifiers.count)):\n"
+        for id in Set(identifiers).sorted() {
+            report += "  - \(id)\n"
+        }
+
+        // Full element tree (truncated if huge — 10K char cap)
+        let tree = app.debugDescription
+        let truncated = tree.count > 10_000
+            ? String(tree.prefix(10_000)) + "\n  ... (truncated, full tree was \(tree.count) chars)"
+            : tree
+        report += "\nElement tree:\n\(truncated)\n"
+
+        report += "========== end dump: \(label) ==========\n"
+        NSLog("%@", report)
+        // Also print to stdout so it's visible in xcodebuild output
+        print(report)
+    }
+
     /// Assert the app hasn't frozen for more than the timeout
     func assertNoFreeze(timeout: TimeInterval = 5.0) {
         // Try to interact with the app - if it's frozen, this will timeout

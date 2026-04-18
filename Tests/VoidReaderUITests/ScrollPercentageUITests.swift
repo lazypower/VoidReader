@@ -33,17 +33,16 @@ final class ScrollPercentageUITests: VoidReaderUITestCase {
         // avoids confusion with any other ScrollView in the hierarchy
         // (e.g. an NSOpenPanel sidebar if DocumentGroup ever falls back to
         // the chooser).
+        // Always dump initial state so we can see what XCUITest sees right
+        // after launch. Cheap, and the only way to triage CI failures
+        // without VNC visibility.
+        dumpAccessibilityState(label: "after launchAndOpen")
+
         let scrollArea = app.scrollViews["reader-view"]
         let appeared = scrollArea.waitForExistence(timeout: 15)
 
         if !appeared {
-            // Diagnostic: dump window titles so future failures are easier
-            // to triage. Don't fail here — let the test's first interaction
-            // produce the actual error.
-            let titles = (0..<app.windows.count).map {
-                app.windows.element(boundBy: $0).title
-            }
-            NSLog("[ScrollPercentageUITests] reader-view didn't appear; windows=\(titles)")
+            dumpAccessibilityState(label: "reader-view never appeared")
         }
 
         // Click to give keyboard focus.
@@ -58,12 +57,33 @@ final class ScrollPercentageUITests: VoidReaderUITestCase {
     /// Read the current percent from the status bar via the "percent-read"
     /// accessibility identifier. The value is exposed as "N%" in the element's value.
     private func readPercentRead() -> Int? {
-        let element = app.staticTexts.matching(identifier: "percent-read").firstMatch
-        guard element.waitForExistence(timeout: 5) else { return nil }
+        // Try staticTexts first (where the identifier should be after the
+        // recent fix that moved it onto the Text element).
+        let staticText = app.staticTexts.matching(identifier: "percent-read").firstMatch
+        if staticText.waitForExistence(timeout: 5),
+           let value = staticText.value as? String,
+           let pct = Int(value.replacingOccurrences(of: "%", with: ""))
+        {
+            return pct
+        }
 
-        // Value is "0%", "42%", "100%", etc.
-        guard let value = element.value as? String else { return nil }
-        return Int(value.replacingOccurrences(of: "%", with: ""))
+        // Fallback: any element with that identifier (in case SwiftUI
+        // exposes it on a different XCUIElement type).
+        let any = app.descendants(matching: .any)
+            .matching(identifier: "percent-read")
+            .firstMatch
+        if any.exists {
+            // Try value, then label, then strip trailing % from either.
+            let raw = (any.value as? String) ?? any.label
+            if let pct = Int(raw.replacingOccurrences(of: "%", with: "")) {
+                return pct
+            }
+            NSLog("[readPercentRead] found percent-read but couldn't parse: value=\((any.value as? String).debugDescription) label=\(any.label.debugDescription)")
+        } else {
+            dumpAccessibilityState(label: "readPercentRead: percent-read not found")
+        }
+
+        return nil
     }
 
     /// Scroll down using Page Down and wait for debounce to settle.
