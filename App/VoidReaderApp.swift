@@ -79,6 +79,11 @@ struct VoidReaderApp: App {
                     NSApp.sendAction(#selector(NSDocument.save(_:)), to: nil, from: nil)
                 }
                 .keyboardShortcut("s", modifiers: .command)
+
+                Button("Reload from Disk") {
+                    NotificationCenter.default.post(name: .reloadFromDisk, object: nil)
+                }
+                .keyboardShortcut("r", modifiers: .command)
             }
 
             // File menu - Print (replace default)
@@ -118,4 +123,5 @@ extension Notification.Name {
     static let shareDocument = Notification.Name("shareDocument")
     static let scrollToHeading = Notification.Name("scrollToHeading")
     static let formatDocument = Notification.Name("formatDocument")
+    static let reloadFromDisk = Notification.Name("reloadFromDisk")
 }
