@@ -46,6 +46,7 @@ struct ContentView: View {
     private let exportPDFPublisher = NotificationCenter.default.publisher(for: .exportPDF)
     private let sharePublisher = NotificationCenter.default.publisher(for: .shareDocument)
     private let formatDocumentPublisher = NotificationCenter.default.publisher(for: .formatDocument)
+    private let reloadFromDiskPublisher = NotificationCenter.default.publisher(for: .reloadFromDisk)
 
     // Share sheet state
     @State private var showingShare = false
@@ -212,6 +213,9 @@ struct ContentView: View {
         }
         .onReceive(formatDocumentPublisher) { _ in
             formatDocument()
+        }
+        .onReceive(reloadFromDiskPublisher) { _ in
+            reloadFromDisk()
         }
         .onChange(of: searchText) { _, _ in
             searchUpdatePublisher.send()
@@ -802,55 +806,62 @@ struct ContentView: View {
 
         // Set up watcher for external changes
         fileWatcher = FileWatcher(url: url) { [self] in
-            // Ignore if we're suppressing (our own format/save in progress)
-            guard !suppressExternalChangeAlert else {
+            let resolution = ExternalChangeDetector.resolve(
+                currentModDate: url.fileModificationDate,
+                lastKnownModDate: lastKnownModDate,
+                isOwnSaveInProgress: suppressExternalChangeAlert
+            )
+
+            switch resolution {
+            case .ownSaveInProgress:
                 lastKnownModDate = url.fileModificationDate
-                return
-            }
-
-            // Check if file actually changed (not just touched)
-            guard let currentModDate = url.fileModificationDate,
-                  let lastKnown = lastKnownModDate,
-                  currentModDate > lastKnown else {
-                return
-            }
-
-            // Show alert on main thread
-            DispatchQueue.main.async {
-                showExternalChangeAlert = true
+            case .externalChange:
+                DispatchQueue.main.async {
+                    showExternalChangeAlert = true
+                }
+            case .noChange:
+                break
             }
         }
     }
 
     private func reloadFromDisk() {
-        guard let url = fileURL,
-              let data = try? Data(contentsOf: url),
+        guard let url = fileURL else { return }
+
+        // Prefer NSDocument.revert so the reload does not mark the document dirty.
+        // SwiftUI's DocumentGroup owns an NSDocument under the hood; revert re-reads
+        // the file through the normal FileDocument.init(configuration:) path and
+        // clears the change count.
+        if let nsDoc = NSDocumentController.shared.document(for: url) {
+            do {
+                let type = nsDoc.fileType ?? "public.plain-text"
+                try nsDoc.revert(toContentsOf: url, ofType: type)
+                lastKnownModDate = url.fileModificationDate
+                // onChange(of: document.text) handles re-rendering.
+                return
+            } catch {
+                DebugLog.error(.lifecycle, "NSDocument revert failed: \(error.localizedDescription) — falling back to direct read")
+            }
+        }
+
+        // Fallback: direct read (will mark document dirty, but better than no reload).
+        guard let data = try? Data(contentsOf: url),
               let text = String(data: data, encoding: .utf8) else {
             return
         }
 
         document.text = text
         lastKnownModDate = url.fileModificationDate
-
-        // Re-render
         updateHeadings(from: text)
         updateRenderedBlocks(from: text)
     }
 
     /// Checks for save conflicts before saving. Returns true if safe to save.
     func checkSaveConflict() -> Bool {
-        guard let url = fileURL,
-              let currentModDate = url.fileModificationDate,
-              let lastKnown = lastKnownModDate else {
-            return true // No conflict detection possible, allow save
-        }
-
-        if currentModDate > lastKnown {
-            // File was modified externally - show conflict dialog
-            return false
-        }
-
-        return true
+        SaveConflictPolicy.isSafeToSave(
+            currentModDate: fileURL?.fileModificationDate,
+            lastKnownModDate: lastKnownModDate
+        )
     }
 
     private var readerView: some View {
