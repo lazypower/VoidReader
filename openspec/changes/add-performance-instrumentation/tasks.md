@@ -28,10 +28,10 @@
   - [x] 2.2.3 Emit `firstPaint` event when the first batch of document-body blocks becomes visible — guarded by `@State firstPaintFired`; reset to `false` in `reloadFromDisk` so a reload re-emits paired with the new `reloadFromDisk` interval; fires on first non-empty `renderedBlocks` assignment (~1 SwiftUI frame before actual on-screen paint — closest hook without coupling into LazyVStack child lifecycle)
   - [x] 2.2.4 Wrap syntax highlight pass with `syntaxHighlightPass` interval — single interval covering both visible-region and full-document paths, distinguished by `mode=visible|full` metadata
 
-- [ ] 2.3 Subsystem signposts
-  - [ ] 2.3.1 Wrap `MermaidImageRenderer.renderAll` with `mermaidRender` interval; attach metadata (diagram count)
-  - [ ] 2.3.2 Wrap `ImageLoader.loadImage` with `imageLoad` interval; attach metadata (URL scheme, bytes loaded)
-  - [ ] 2.3.3 Emit `scrollTick` event from scroll position observer (event form, no interval pairing)
+- [x] 2.3 Subsystem signposts
+  - [x] 2.3.1 Wrap `MermaidImageRenderer.renderAll` with `mermaidRender` interval; attach metadata (diagram count)
+  - [x] 2.3.2 Wrap `ImageLoader.loadImage` with `imageLoad` interval; attach metadata (URL scheme, bytes loaded) — extended per session feedback to also include `cache=hit|miss|coalesced` and `dims=WxH` for chasing image-related scroll jank later. `fetchImage` refactored to return `(NSImage?, Int)` so byte count is in scope for the metadata.
+  - [x] 2.3.3 Emit `scrollTick` event from scroll position observer (event form, no interval pairing) — sampled to avoid timeline static. Tick #1 of each burst always emits (so brief scrolls register), then every 10th tick (~6Hz under active 60Hz scrolling). Counter resets in the debounced `reportPosition` so each gesture is independently visible.
 
 ### 3. Developer Workflow
 
