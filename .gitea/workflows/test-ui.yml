@@ -17,6 +17,19 @@ jobs:
           fi
           echo "WindowServer is running — GUI session available"
 
+      - name: Dump session diagnostics
+        run: |
+          echo "=== User ==="
+          id
+          echo "=== Security Session ==="
+          security session-info 2>&1 || true
+          echo "=== Session Env ==="
+          env | grep -iE 'session|display|aqua|window|apple|xpc' | sort || true
+          echo "=== Process Tree ==="
+          ps -eo pid,ppid,sess,tty,comm | grep -E '(act_runner|xcodebuild|bash|zsh|PID)' || true
+          echo "=== Keychain Search List ==="
+          security list-keychains -d user
+
       - name: Generate Xcode project
         run: make project
 
