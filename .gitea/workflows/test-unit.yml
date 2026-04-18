@@ -20,5 +20,4 @@ jobs:
           xcodebuild -scheme VoidReader -configuration Debug \
             test -only-testing:VoidReaderTests \
             -resultBundlePath TestResults/unit.xcresult \
-            CODE_SIGNING_ALLOWED=NO \
-            -quiet
+            CODE_SIGNING_ALLOWED=NO
