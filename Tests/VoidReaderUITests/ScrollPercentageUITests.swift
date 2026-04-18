@@ -64,23 +64,29 @@ final class ScrollPercentageUITests: VoidReaderUITestCase {
         return Int(value.replacingOccurrences(of: "%", with: ""))
     }
 
-    /// Scroll down using swipe gestures and wait for debounce to settle.
+    /// Scroll down using Page Down and wait for debounce to settle.
+    ///
+    /// Uses keyboard scroll instead of `scrollView.scroll(byDeltaX:deltaY:)`
+    /// because scroll-wheel event synthesis doesn't reliably move SwiftUI
+    /// ScrollViews on macOS XCUITest (verified on Firecracker runners:
+    /// scroll events fire but content position never updates).
     private func scrollAndSettle(pages: Int) {
-        let scrollArea = app.scrollViews.firstMatch
         for _ in 0..<pages {
-            scrollArea.scroll(byDeltaX: 0, deltaY: -400)
+            app.typeKey(.pageDown, modifierFlags: [])
             usleep(200_000)
         }
         usleep(500_000)
     }
 
-    /// Scroll to the very end of the document.
+    /// Scroll to the very end of the document via Cmd+Down (End-of-document).
     private func scrollToBottom() {
-        let scrollArea = app.scrollViews.firstMatch
-        // Scroll aggressively to the bottom
-        for _ in 0..<30 {
-            scrollArea.scroll(byDeltaX: 0, deltaY: -500)
-            usleep(100_000)
+        app.typeKey(.downArrow, modifierFlags: .command)
+        usleep(500_000)
+        // Belt-and-suspenders: also page-down a bunch in case Cmd+Down
+        // isn't bound in this view.
+        for _ in 0..<40 {
+            app.typeKey(.pageDown, modifierFlags: [])
+            usleep(50_000)
         }
         usleep(500_000)
     }
