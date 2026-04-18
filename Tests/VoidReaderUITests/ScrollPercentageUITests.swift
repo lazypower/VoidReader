@@ -19,8 +19,7 @@ final class ScrollPercentageUITests: VoidReaderUITestCase {
         .appendingPathComponent("Fixtures/mixed-content-scroll.md")
         .path
 
-    /// Launch the app and open the mixed-content test document via the canonical
-    /// DocumentGroup open path (osascript `open POSIX file ...`).
+    /// Launch the app and open the mixed-content test document.
     private func launchWithMixedContent() {
         launchAndOpen(documentPath: Self.mixedContentPath)
 
@@ -28,8 +27,14 @@ final class ScrollPercentageUITests: VoidReaderUITestCase {
         // (launchAndOpen already sleeps 3s; mixed-content needs a little more).
         sleep(2)
 
+        // DocumentGroup may have shown its "no document" open panel before
+        // `open -a` delivered the doc. Dismiss it with Escape — harmless if
+        // no panel is showing.
+        app.typeKey(.escape, modifierFlags: [])
+        usleep(300_000)
+
         // Close any extra "Untitled" windows DocumentGroup may have created
-        // before the fixture opened via AppleEvent.
+        // before the fixture opened.
         let windowCount = app.windows.count
         if windowCount > 1 {
             for i in (0..<windowCount).reversed() {
@@ -42,12 +47,15 @@ final class ScrollPercentageUITests: VoidReaderUITestCase {
             }
         }
 
-        // Click the content area to give the scroll view keyboard focus
-        let scrollArea = app.scrollViews.firstMatch
+        // Click the reader scroll view (by accessibility identifier) to give
+        // it keyboard focus. `firstMatch` is unreliable here — it sometimes
+        // resolves to the open panel's sidebar ScrollView before the panel
+        // is dismissed.
+        let scrollArea = app.scrollViews["reader-view"]
         if scrollArea.waitForExistence(timeout: 5) {
             scrollArea.click()
         } else {
-            // Fallback: click center of window
+            // Fallback: click center of the document window
             app.windows.firstMatch.click()
         }
         usleep(300_000)
