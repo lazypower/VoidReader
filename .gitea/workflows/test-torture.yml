@@ -33,6 +33,9 @@ jobs:
       - name: Generate Xcode project
         run: make project
 
+      - name: Kill stale VoidReader instances
+        run: killall VoidReader || true
+
       - name: Run torture tests
         timeout-minutes: 15
         run: |
