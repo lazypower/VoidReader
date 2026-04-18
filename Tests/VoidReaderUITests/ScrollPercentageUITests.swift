@@ -7,7 +7,14 @@ import XCTest
 /// The old bug estimated height as blockCount * 60px, causing 100% at ~25%.
 final class ScrollPercentageUITests: VoidReaderUITestCase {
 
-    static let mixedContentPath = "/Users/chuck/Code/void_reader/TestDocuments/mixed-content-scroll.md"
+    /// Project root derived from this source file's location.
+    static let projectRoot = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent() // VoidReaderUITests/
+        .deletingLastPathComponent() // Tests/
+        .deletingLastPathComponent() // project root
+        .path
+
+    static let mixedContentPath = "\(projectRoot)/TestDocuments/mixed-content-scroll.md"
 
     /// Launch the app with the mixed-content test document via --open argument.
     private func launchWithMixedContent() {
