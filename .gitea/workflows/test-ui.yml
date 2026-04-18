@@ -1,0 +1,29 @@
+name: UI Tests
+
+on: [push, pull_request]
+
+jobs:
+  ui-test:
+    name: UI Tests (XCUITest)
+    runs-on: apple
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require GUI session
+        run: |
+          if ! pgrep -x WindowServer > /dev/null 2>&1; then
+            echo "::error::No GUI session — WindowServer is not running. VNC in and log in to restore the session."
+            exit 1
+          fi
+          echo "WindowServer is running — GUI session available"
+
+      - name: Generate Xcode project
+        run: make project
+
+      - name: Run UI tests
+        run: |
+          xcodebuild -scheme VoidReader -configuration Debug \
+            test -only-testing:VoidReaderUITests \
+            -resultBundlePath TestResults/ui.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            -quiet
