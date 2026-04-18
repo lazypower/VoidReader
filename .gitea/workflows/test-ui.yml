@@ -7,22 +7,13 @@ jobs:
     name: UI Tests (XCUITest)
     runs-on: apple
     steps:
+      - uses: actions/swift-ci-actions/require-gui-session@v1
       - uses: actions/checkout@v4
-
-      - name: Require GUI session
-        run: |
-          if ! pgrep -x WindowServer > /dev/null 2>&1; then
-            echo "::error::No GUI session — WindowServer is not running. VNC in and log in to restore the session."
-            exit 1
-          fi
-          echo "WindowServer is running — GUI session available"
-
-      - name: Generate Xcode project
-        run: make project
-
-      - name: Run UI tests
-        run: |
-          xcodebuild -scheme VoidReader -configuration Debug \
-            test -only-testing:VoidReaderUITests/LargeDocumentTests \
-            -only-testing:VoidReaderUITests/ScrollPercentageUITests \
-            -resultBundlePath TestResults/ui.xcresult
+      - uses: actions/swift-ci-actions/setup-swift-project@v1
+      - uses: actions/swift-ci-actions/xcode-test@v1
+        with:
+          scheme: VoidReader
+          only-testing: |
+            VoidReaderUITests/LargeDocumentTests
+            VoidReaderUITests/ScrollPercentageUITests
+          result-bundle-path: TestResults/ui.xcresult
