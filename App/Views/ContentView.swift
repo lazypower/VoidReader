@@ -182,6 +182,8 @@ struct ContentView: View {
             defer { signposter.endInterval("openDocument", state) }
 
             DebugLog.info(.lifecycle, "ContentView.onAppear - \(fileURL?.lastPathComponent ?? "untitled") (\(document.text.count) chars)")
+            // DIAGNOSTIC: confirm whether signposts are enabled at runtime. Remove after debugging.
+            DebugLog.info(.lifecycle, "Signposts.lifecycle.isEnabled=\(Signposts.lifecycle.isEnabled) rendering.isEnabled=\(Signposts.rendering.isEnabled)")
             DebugLog.logMemory(.lifecycle, context: "Document open")
             setupDebouncing()
             updateHeadings(from: document.text)

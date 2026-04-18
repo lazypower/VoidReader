@@ -14,12 +14,27 @@ struct VoidReaderApp: App {
         handleOpenArgument()
     }
 
-    /// Open a document path passed via --open argument (for UI testing)
+    /// Open a document path passed via the `--open` argument (for UI testing) or the
+    /// `VOID_READER_OPEN` environment variable (for `make profile` / xctrace).
+    ///
+    /// Why env var alongside argv: when the path is in argv, AppKit/LaunchServices sees
+    /// the file path and triggers an `application:openFiles:` event, which LaunchServices
+    /// routes to a registered handler for the bundle ID — spawning a *second* process
+    /// that opens the same document. Two processes, two windows, broken xctrace lifetime.
+    /// Env vars aren't visible to LaunchServices' file-routing, so this stays single-process.
     private func handleOpenArgument() {
         let args = CommandLine.arguments
+        var resolvedPath: String?
+
         if let openIndex = args.firstIndex(of: "--open"),
            openIndex + 1 < args.count {
-            let path = args[openIndex + 1]
+            resolvedPath = args[openIndex + 1]
+        } else if let envPath = ProcessInfo.processInfo.environment["VOID_READER_OPEN"],
+                  !envPath.isEmpty {
+            resolvedPath = envPath
+        }
+
+        if let path = resolvedPath {
             let url = URL(fileURLWithPath: path)
             DebugLog.info(.lifecycle, "Opening document from argument: \(path)")
 
@@ -31,6 +46,17 @@ struct VoidReaderApp: App {
                 ) { _, _, error in
                     if let error = error {
                         DebugLog.error(.lifecycle, "Failed to open: \(error.localizedDescription)")
+                        return
+                    }
+                    // DocumentGroup auto-spawns an Untitled (or open-dialog) window at
+                    // launch when no document is provided. Without --open this is fine,
+                    // but with --open we now have two windows in the same process — the
+                    // requested doc plus a blank Untitled. That keeps the process alive
+                    // until both close, which breaks `make profile` (xctrace waits on
+                    // process exit) and confused UI test cleanup. Close any docs without
+                    // a fileURL — they're the auto-spawned blanks.
+                    for doc in NSDocumentController.shared.documents where doc.fileURL == nil {
+                        doc.close()
                     }
                 }
             }

@@ -107,11 +107,19 @@ profile: build
 		echo "Profiling with document: $$ABS_FILE"; \
 		echo "Recording with Time Profiler template (xctrace headless)..."; \
 		mkdir -p build/traces; \
-		TRACE_OUT="build/traces/voidreader-$$(date +%Y%m%d-%H%M%S).trace"; \
+		STAMP="$$(date +%Y%m%d-%H%M%S)"; \
+		TRACE_OUT="build/traces/voidreader-$$STAMP.trace"; \
+		DEBUG_LOG="build/traces/voidreader-$$STAMP.debug.log"; \
 		xcrun xctrace record \
 			--template 'Time Profiler' \
+			--instrument os_signpost \
+			--env VOID_READER_DEBUG=1 \
+			--env VOID_READER_DEBUG_FILE="$$PWD/$$DEBUG_LOG" \
+			--env VOID_READER_OPEN="$$ABS_FILE" \
 			--output "$$TRACE_OUT" \
-			--launch -- "$$APP_PATH/Contents/MacOS/VoidReader" "$$ABS_FILE"; \
+			--launch -- "$$APP_PATH/Contents/MacOS/VoidReader"; \
+		echo ""; \
+		echo "  Debug log: $$DEBUG_LOG"; \
 		echo ""; \
 		echo "✓ Trace recorded: $$TRACE_OUT"; \
 		echo "  Open with: open $$TRACE_OUT"; \
