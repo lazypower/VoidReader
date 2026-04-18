@@ -11,8 +11,14 @@ import os.signpost
 /// ## Subsystem Layout
 /// Each `SignpostCategory` gets its own `OSSignposter` with a stable subsystem identifier of the
 /// form `place.wabash.VoidReader.<category>`. This namespace is intentionally distinct from
-/// `DebugLog`'s `com.voidreader.debug.*` so Instruments' "Points of Interest" filter can isolate
-/// signposts cleanly without pulling in DebugLog noise.
+/// `DebugLog`'s `com.voidreader.debug.*` so Instruments' subsystem filter can isolate signposts
+/// cleanly without pulling in DebugLog noise.
+///
+/// All signposters use the OSLog category `"PointsOfInterest"` (Apple's well-known constant)
+/// so the built-in Instruments **Points of Interest** instrument picks them up automatically.
+/// Per-domain grouping is preserved through the *subsystem*, not the category — filter the
+/// Instruments detail pane by subsystem (`place.wabash.VoidReader.rendering`, etc.) to isolate
+/// one domain.
 ///
 /// ## Zero-Overhead Contract
 /// `OSSignposter` is designed to be effectively free when Instruments is not recording. Hot-loop
@@ -44,21 +50,27 @@ public enum Signposts {
     public static let mermaidSubsystem = "place.wabash.VoidReader.mermaid"
     public static let imageSubsystem = "place.wabash.VoidReader.image"
 
+    /// OSLog category used by every VoidReader signposter. Apple's Points of Interest
+    /// instrument filters on this exact string — using a per-domain category here causes
+    /// signposts to vanish from the built-in lane (we hit this in the first profile run).
+    /// Per-domain grouping is carried by the *subsystem* identifier instead.
+    public static let pointsOfInterestCategory = "PointsOfInterest"
+
     /// Signposter for the markdown rendering pipeline (`parseMarkdown`, `renderBatch`,
     /// `firstPaint`, `syntaxHighlightPass`).
-    public static let rendering = OSSignposter(subsystem: renderingSubsystem, category: "rendering")
+    public static let rendering = OSSignposter(subsystem: renderingSubsystem, category: pointsOfInterestCategory)
 
     /// Signposter for document lifecycle (`openDocument`, `closeDocument`, `reloadFromDisk`).
-    public static let lifecycle = OSSignposter(subsystem: lifecycleSubsystem, category: "lifecycle")
+    public static let lifecycle = OSSignposter(subsystem: lifecycleSubsystem, category: pointsOfInterestCategory)
 
     /// Signposter for scroll-loop signals (`scrollTick` event).
-    public static let scroll = OSSignposter(subsystem: scrollSubsystem, category: "scroll")
+    public static let scroll = OSSignposter(subsystem: scrollSubsystem, category: pointsOfInterestCategory)
 
     /// Signposter for mermaid diagram rendering (`mermaidRender`).
-    public static let mermaid = OSSignposter(subsystem: mermaidSubsystem, category: "mermaid")
+    public static let mermaid = OSSignposter(subsystem: mermaidSubsystem, category: pointsOfInterestCategory)
 
     /// Signposter for image loading (`imageLoad`).
-    public static let image = OSSignposter(subsystem: imageSubsystem, category: "image")
+    public static let image = OSSignposter(subsystem: imageSubsystem, category: pointsOfInterestCategory)
 
     // MARK: - Convenience API
 
