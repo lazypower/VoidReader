@@ -1,0 +1,42 @@
+name: Torture Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  torture-test:
+    name: Scroll Performance Torture Suite
+    runs-on: apple
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require GUI session
+        run: |
+          if ! pgrep -x WindowServer > /dev/null 2>&1; then
+            echo "::error::No GUI session — WindowServer is not running. VNC in and log in to restore the session."
+            exit 1
+          fi
+          echo "WindowServer is running — GUI session available"
+
+      - name: Generate Xcode project
+        run: make project
+
+      - name: Run torture tests
+        timeout-minutes: 15
+        run: |
+          xcodebuild -scheme VoidReader -configuration Debug \
+            test -only-testing:VoidReaderUITests/ScrollPerformanceTests \
+            -resultBundlePath TestResults/torture.xcresult \
+            2>&1 | tee /tmp/torture_test_output.log
+
+      - name: Print frame drop summary
+        if: always()
+        run: |
+          echo "=== Frame Drop Summary ==="
+          grep -E "(Scroll|Trackpad).*frames.*dropped" /tmp/torture_test_output.log || echo "No frame drop stats found in output"
+          echo ""
+          echo "=== Test Results ==="
+          grep -E "(Test Case|Tests? (passed|failed))" /tmp/torture_test_output.log || true
