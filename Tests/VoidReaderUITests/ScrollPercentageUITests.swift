@@ -14,7 +14,10 @@ final class ScrollPercentageUITests: VoidReaderUITestCase {
         .deletingLastPathComponent() // project root
         .path
 
-    static let mixedContentPath = "\(projectRoot)/TestDocuments/mixed-content-scroll.md"
+    static let mixedContentPath = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent() // VoidReaderUITests/
+        .appendingPathComponent("Fixtures/mixed-content-scroll.md")
+        .path
 
     /// Launch the app with the mixed-content test document via --open argument.
     private func launchWithMixedContent() {
