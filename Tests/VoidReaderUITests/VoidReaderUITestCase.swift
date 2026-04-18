@@ -44,32 +44,18 @@ class VoidReaderUITestCase: XCTestCase {
 
     /// Launch app and open a document at the given path.
     ///
-    /// Uses `/usr/bin/open -a VoidReader <path>` which routes through Launch
-    /// Services. This avoids the AppleEvents -600 ("Application isn't running")
-    /// errors we hit on Firecracker runners, where NSAppleEventManager
-    /// registration is unreliable shortly after `app.launch()` returns.
+    /// Passes the document path as a launch argument. DocumentGroup-based
+    /// apps interpret file-path arguments at launch the same way as a
+    /// Finder double-click — no AppleEvent involved. This avoids the race
+    /// between `app.launch()` and a follow-up `open -a` we'd hit on
+    /// Firecracker runners (the doc would never open, leaving only the
+    /// default Untitled window).
     func launchAndOpen(documentPath: String) {
+        app.launchArguments += [documentPath]
         app.launch()
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = ["-a", "VoidReader", documentPath]
-        let errPipe = Pipe()
-        process.standardError = errPipe
-        try? process.run()
-        process.waitUntilExit()
-
-        let stderr = String(
-            data: errPipe.fileHandleForReading.readDataToEndOfFile(),
-            encoding: .utf8
-        ) ?? ""
-        XCTAssertEqual(
-            process.terminationStatus, 0,
-            "`open -a VoidReader` failed. stderr: \(stderr)"
-        )
-
         // Wait for the document to load
-        sleep(3) // Give time for document to open and render
+        sleep(3)
 
         let window = app.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 30), "Window should exist after opening document")
