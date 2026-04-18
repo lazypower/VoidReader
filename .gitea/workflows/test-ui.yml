@@ -1,0 +1,20 @@
+name: UI Tests
+
+on: [push, pull_request]
+
+jobs:
+  ui-test:
+    name: UI Tests (XCUITest)
+    runs-on: apple
+    steps:
+      - uses: actions/swift-ci-actions/require-gui-session@v1
+      - uses: actions/checkout@v4
+      - uses: actions/swift-ci-actions/setup-swift-project@v1
+      - name: Kill stale VoidReader instances
+        run: killall VoidReader || true
+      - uses: actions/swift-ci-actions/xcode-test@v1
+        with:
+          scheme: VoidReader
+          only-testing: |
+            VoidReaderUITests/LargeDocumentTests
+          result-bundle-path: TestResults/ui.xcresult

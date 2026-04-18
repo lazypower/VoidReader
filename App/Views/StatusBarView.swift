@@ -39,11 +39,12 @@ struct StatusBarView: View {
                 Divider()
                     .frame(height: 12)
 
-                statItem(
-                    icon: "book",
-                    value: "\(percent)%"
-                )
-                .accessibilityIdentifier("percent-read")
+                HStack(spacing: 4) {
+                    Image(systemName: "book")
+                        .font(.caption2)
+                    Text("\(percent)%")
+                        .accessibilityIdentifier("percent-read")
+                }
             }
 
             Spacer()

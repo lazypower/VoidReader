@@ -1,0 +1,16 @@
+name: Package Tests
+
+on: [push, pull_request]
+
+jobs:
+  swift-test:
+    name: Swift Package Tests
+    runs-on: apple
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve dependencies
+        run: swift package resolve
+
+      - name: Run package tests
+        run: swift test

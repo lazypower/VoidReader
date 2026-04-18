@@ -1,0 +1,54 @@
+name: Torture Tests
+
+on: [push, pull_request]
+
+jobs:
+  torture-test:
+    name: Scroll Performance Torture Suite
+    runs-on: apple
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require GUI session
+        run: |
+          if ! pgrep -x WindowServer > /dev/null 2>&1; then
+            echo "::error::No GUI session — WindowServer is not running. VNC in and log in to restore the session."
+            exit 1
+          fi
+          echo "WindowServer is running — GUI session available"
+
+      - name: Generate test fixtures
+        run: |
+          mkdir -p TestDocuments
+          # 100K-line code block
+          echo '```' > TestDocuments/torture_100k_code.md
+          for i in $(seq 1 100000); do echo "line $i: func process(data: [Int]) -> [Int] { return data.map { \$0 * 2 }.filter { \$0 > 10 } }"; done >> TestDocuments/torture_100k_code.md
+          echo '```' >> TestDocuments/torture_100k_code.md
+          # 50K-row table
+          echo '| Row | Col A | Col B | Col C |' > TestDocuments/torture_50k_table.md
+          echo '|-----|-------|-------|-------|' >> TestDocuments/torture_50k_table.md
+          for i in $(seq 1 50000); do echo "| $i | data_a_$i | data_b_$i | data_c_$i |"; done >> TestDocuments/torture_50k_table.md
+          ls -lh TestDocuments/
+
+      - name: Generate Xcode project
+        run: make project
+
+      - name: Kill stale VoidReader instances
+        run: killall VoidReader || true
+
+      - name: Run torture tests
+        timeout-minutes: 15
+        run: |
+          xcodebuild -scheme VoidReader -configuration Debug \
+            test -only-testing:VoidReaderUITests/ScrollPerformanceTests \
+            -resultBundlePath TestResults/torture.xcresult \
+            2>&1 | tee /tmp/torture_test_output.log
+
+      - name: Print frame drop summary
+        if: always()
+        run: |
+          echo "=== Frame Drop Summary ==="
+          grep -E "(Scroll|Trackpad).*frames.*dropped" /tmp/torture_test_output.log || echo "No frame drop stats found in output"
+          echo ""
+          echo "=== Test Results ==="
+          grep -E "(Test Case|Tests? (passed|failed))" /tmp/torture_test_output.log || true

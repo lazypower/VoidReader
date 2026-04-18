@@ -23,6 +23,9 @@ class VoidReaderUITestCase: XCTestCase {
 
         app = XCUIApplication()
 
+        // Suppress macOS window state restoration between test runs
+        app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]
+
         // Enable debug telemetry
         app.launchEnvironment["VOID_READER_DEBUG"] = "1"
 
@@ -39,26 +42,20 @@ class VoidReaderUITestCase: XCTestCase {
 
     // MARK: - Helpers
 
-    /// Launch app and open a document at the given path
+    /// Launch app and open a document at the given path.
+    ///
+    /// Passes the document path as a launch argument. DocumentGroup-based
+    /// apps interpret file-path arguments at launch the same way as a
+    /// Finder double-click — no AppleEvent involved. This avoids the race
+    /// between `app.launch()` and a follow-up `open -a` we'd hit on
+    /// Firecracker runners (the doc would never open, leaving only the
+    /// default Untitled window).
     func launchAndOpen(documentPath: String) {
+        app.launchArguments += [documentPath]
         app.launch()
 
-        // Use AppleScript to open the file (more reliable than UI automation)
-        let script = """
-        tell application "VoidReader"
-            activate
-            open POSIX file "\(documentPath)"
-        end tell
-        """
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
-        try? process.run()
-        process.waitUntilExit()
-
         // Wait for the document to load
-        sleep(3) // Give time for document to open and render
+        sleep(3)
 
         let window = app.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 30), "Window should exist after opening document")
@@ -139,6 +136,46 @@ class VoidReaderUITestCase: XCTestCase {
             return nil
         }
         return try? String(contentsOfFile: logPath, encoding: .utf8)
+    }
+
+    /// Dump the full XCUITest view of the app to NSLog. Call from any
+    /// test diagnostic path — output lands in xcodebuild stderr, which
+    /// CI captures and `tea actions runs logs` returns.
+    ///
+    /// Includes window titles + frames, the full element tree, and a
+    /// flat list of every accessibility identifier present.
+    func dumpAccessibilityState(label: String) {
+        var report = "\n========== XCUITest dump: \(label) ==========\n"
+
+        // Window summary
+        let windowCount = app.windows.count
+        report += "Windows: \(windowCount)\n"
+        for i in 0..<windowCount {
+            let w = app.windows.element(boundBy: i)
+            report += "  [\(i)] title=\(w.title.debugDescription) frame=\(w.frame)\n"
+        }
+
+        // All identifiers present anywhere in the hierarchy
+        let allElements = app.descendants(matching: .any).allElementsBoundByIndex
+        let identifiers = allElements
+            .map { $0.identifier }
+            .filter { !$0.isEmpty }
+        report += "\nIdentifiers present (\(identifiers.count)):\n"
+        for id in Set(identifiers).sorted() {
+            report += "  - \(id)\n"
+        }
+
+        // Full element tree (truncated if huge — 10K char cap)
+        let tree = app.debugDescription
+        let truncated = tree.count > 10_000
+            ? String(tree.prefix(10_000)) + "\n  ... (truncated, full tree was \(tree.count) chars)"
+            : tree
+        report += "\nElement tree:\n\(truncated)\n"
+
+        report += "========== end dump: \(label) ==========\n"
+        NSLog("%@", report)
+        // Also print to stdout so it's visible in xcodebuild output
+        print(report)
     }
 
     /// Assert the app hasn't frozen for more than the timeout
