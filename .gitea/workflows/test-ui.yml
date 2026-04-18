@@ -15,7 +15,10 @@ jobs:
       - uses: actions/swift-ci-actions/xcode-test@v1
         with:
           scheme: VoidReader
+          # ScrollPercentageUITests excluded — they require keyboard-driven
+          # scrolling in the reader view, which the app doesn't currently
+          # implement (no .onKeyPress(.pageDown) on the reader ScrollView).
+          # See chuck/VoidReader#2.
           only-testing: |
             VoidReaderUITests/LargeDocumentTests
-            VoidReaderUITests/ScrollPercentageUITests
           result-bundle-path: TestResults/ui.xcresult
