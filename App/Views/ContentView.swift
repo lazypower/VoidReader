@@ -70,6 +70,10 @@ struct ContentView: View {
     @State private var caseSensitive = false
     @State private var useRegex = false
     @State private var searchMatches: [TextSearcher.Match] = []
+    /// Captured substrings for each match, parallel to `searchMatches`. Populated
+    /// once per search update so `currentMatchText` is a cheap array index
+    /// instead of re-searching `document.text` on every SwiftUI re-render.
+    @State private var matchTexts: [String] = []
     @State private var currentMatchIndex = 0
 
     // Cached rendered blocks (expensive to compute)
@@ -837,22 +841,17 @@ struct ContentView: View {
             searchText = ""
             replaceText = ""
             searchMatches = []
+            matchTexts = []
             currentMatchIndex = 0
         }
     }
 
     /// The text of the current match (for replacement preview).
+    /// Reads from the `matchTexts` cache populated by `updateSearch` — avoids
+    /// re-running `TextSearcher.findMatches` on every SwiftUI re-render.
     private var currentMatchText: String? {
-        guard !searchMatches.isEmpty, currentMatchIndex < searchMatches.count else { return nil }
-        let matches = TextSearcher.findMatches(
-            query: searchText,
-            in: document.text,
-            caseSensitive: caseSensitive,
-            useRegex: useRegex
-        )
-        guard currentMatchIndex < matches.count else { return nil }
-        let match = matches[currentMatchIndex]
-        return String(document.text[match.range])
+        guard currentMatchIndex < matchTexts.count else { return nil }
+        return matchTexts[currentMatchIndex]
     }
 
     private func showFindAndReplace() {
@@ -865,17 +864,24 @@ struct ContentView: View {
     private func updateSearch() {
         guard !searchText.isEmpty else {
             searchMatches = []
+            matchTexts = []
             currentMatchIndex = 0
             return
         }
         // Count matches in rendered blocks (same as highlighting uses)
-        searchMatches = countMatchesInRenderedBlocks()
-        currentMatchIndex = searchMatches.isEmpty ? 0 : 0
+        let (matches, texts) = countMatchesInRenderedBlocks()
+        searchMatches = matches
+        matchTexts = texts
+        currentMatchIndex = 0
     }
 
-    /// Counts matches in the rendered block text (not raw markdown).
-    private func countMatchesInRenderedBlocks() -> [TextSearcher.Match] {
+    /// Counts matches in the rendered block text (not raw markdown) and
+    /// captures the matched substring for each. Returning the texts alongside
+    /// the matches lets `currentMatchText` skip a full-document re-search on
+    /// every SwiftUI re-render.
+    private func countMatchesInRenderedBlocks() -> (matches: [TextSearcher.Match], texts: [String]) {
         var allMatches: [TextSearcher.Match] = []
+        var allTexts: [String] = []
 
         for block in renderedBlocks {
             if case .text(let attrString) = block {
@@ -886,11 +892,14 @@ struct ContentView: View {
                     caseSensitive: caseSensitive,
                     useRegex: useRegex
                 )
-                allMatches.append(contentsOf: matches)
+                for match in matches {
+                    allMatches.append(match)
+                    allTexts.append(String(blockText[match.range]))
+                }
             }
         }
 
-        return allMatches
+        return (allMatches, allTexts)
     }
 
     private func findNext() {
