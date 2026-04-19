@@ -524,8 +524,11 @@ struct ContentView: View {
         isRendering = true
         let style = renderStyle  // Capture value type
 
-        // Step 1: Immediately render the first chunk (first ~20KB or first 500 lines)
-        let firstChunkEnd = findFirstChunkEnd(in: text)
+        // Step 1: Immediately render the first chunk. The chunker parses the
+        // document AST once and cuts at the first top-level block boundary
+        // past ~20KB — so code fences, lists, and blockquotes never get split
+        // mid-structure. See MarkdownChunker for the rationale.
+        let firstChunkEnd = MarkdownChunker.findFirstChunkEnd(in: text)
         let firstChunk = String(text.prefix(firstChunkEnd))
 
         let initialBlocks = DebugLog.measure(.rendering, "Initial chunk (\(firstChunk.count) chars)") {
@@ -564,29 +567,6 @@ struct ContentView: View {
                 DebugLog.logMemory(.perf, context: "After render complete")
             }
         }
-    }
-
-    /// Find the end of the first chunk - targets ~20KB or ~500 lines, whichever comes first.
-    /// Always ends at a line boundary to avoid breaking markdown elements.
-    private func findFirstChunkEnd(in text: String) -> Int {
-        let targetSize = 20_000  // ~20KB
-        let maxLines = 500
-
-        var lineCount = 0
-        var charCount = 0
-
-        for char in text {
-            charCount += 1
-            if char == "\n" {
-                lineCount += 1
-                // Stop if we hit either limit
-                if charCount >= targetSize || lineCount >= maxLines {
-                    return charCount
-                }
-            }
-        }
-
-        return text.count  // Document is smaller than our target
     }
 
     private func scrollToHeading(_ heading: HeadingInfo) {
