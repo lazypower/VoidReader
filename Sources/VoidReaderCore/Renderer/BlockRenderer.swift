@@ -61,14 +61,26 @@ public struct BlockRenderer {
     /// Renders markdown text to an array of content blocks.
     public static func render(_ text: String, style: MarkdownRenderer.Style = .init()) -> [MarkdownBlock] {
         let charCount = text.count
+        let byteCount = text.utf8.count
 
-        return DebugLog.measure(.rendering, "BlockRenderer.render(\(charCount) chars)") {
+        // Signpost: parseMarkdown — bytes attached at begin, produced-node count at end (only
+        // known after the walk completes). Uses raw signposter so OSLogMessage interpolation
+        // stays lazy when not recording.
+        let signposter = Signposts.signposter(for: .rendering)
+        let signpostID = signposter.makeSignpostID()
+        let signpostState = signposter.beginInterval(
+            "parseMarkdown",
+            id: signpostID,
+            "bytes=\(byteCount)"
+        )
+
+        let allBlocks: [MarkdownBlock] = DebugLog.measure(.rendering, "BlockRenderer.render(\(charCount) chars)") {
             // Pre-process to extract math blocks ($$...$$)
             let segments = DebugLog.measure(.rendering, "  extractMathBlocks") {
                 extractMathBlocks(from: text)
             }
 
-            var allBlocks: [MarkdownBlock] = []
+            var blocks: [MarkdownBlock] = []
 
             for segment in segments {
                 switch segment {
@@ -82,18 +94,21 @@ public struct BlockRenderer {
                         var walker = BlockWalker(style: style)
                         walker.visit(document)
                         walker.flushTextBuffer()
-                        allBlocks.append(contentsOf: walker.blocks)
+                        blocks.append(contentsOf: walker.blocks)
                     }
 
                 case .math(let latex):
                     // Add math block directly
-                    allBlocks.append(.mathBlock(MathData(latex: latex, isBlock: true)))
+                    blocks.append(.mathBlock(MathData(latex: latex, isBlock: true)))
                 }
             }
 
-            DebugLog.log(.rendering, "  → produced \(allBlocks.count) blocks")
-            return allBlocks
+            DebugLog.log(.rendering, "  → produced \(blocks.count) blocks")
+            return blocks
         }
+
+        signposter.endInterval("parseMarkdown", signpostState, "nodes=\(allBlocks.count)")
+        return allBlocks
     }
 
     /// Segments of content: either markdown text or math blocks

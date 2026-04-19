@@ -77,7 +77,22 @@ struct SyntaxHighlightingEditor: NSViewRepresentable {
 
         // For large documents, only highlight visible region initially
         // This prevents editor freeze on open
-        if charCount > 50_000,
+        let isVisibleOnly = charCount > 50_000
+            && textView.layoutManager != nil
+            && textView.textContainer != nil
+
+        // Signpost: syntaxHighlightPass — single interval covering the whole pass, with
+        // metadata distinguishing the visible-region fast path from the full-document path.
+        let signposter = Signposts.signposter(for: .rendering)
+        let signpostID = signposter.makeSignpostID()
+        let signpostState = signposter.beginInterval(
+            "syntaxHighlightPass",
+            id: signpostID,
+            "mode=\(isVisibleOnly ? "visible" : "full") chars=\(charCount)"
+        )
+        defer { signposter.endInterval("syntaxHighlightPass", signpostState) }
+
+        if isVisibleOnly,
            let layoutManager = textView.layoutManager,
            let textContainer = textView.textContainer {
             DebugLog.measure(.editor, "applyHighlightingVisible(\(charCount) chars)") {

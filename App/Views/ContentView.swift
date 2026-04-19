@@ -76,6 +76,10 @@ struct ContentView: View {
     @State private var renderedBlocks: [MarkdownBlock] = []
     @State private var isRendering = false
     @State private var renderTask: Task<Void, Never>?
+    /// Guard for the `firstPaint` signpost event so it fires exactly once per
+    /// document-open lifecycle. Reset to false in `reloadFromDisk()` so the next paint
+    /// after a reload re-fires it (paired with the `reloadFromDisk` interval).
+    @State private var firstPaintFired = false
 
     /// Document-scoped cache of TextKit-measured `(attributed, height)`
     /// for large code blocks. Populated off-main by `prefetchCodeBlockMeasurements`
@@ -178,7 +182,22 @@ struct ContentView: View {
         }
         .cheatSheetOnHold(isShowing: $showCheatSheet)
         .onAppear {
+            // Signpost: openDocument interval — spans the .onAppear setup work.
+            // Ends after the initial render handoff (sync path returns or progressive path
+            // assigns initialBlocks); see Signposts.lifecycle docstring for boundaries.
+            let signposter = Signposts.signposter(for: .lifecycle)
+            let bytes = document.text.utf8.count
+            let ext = fileURL?.pathExtension ?? ""
+            let state = signposter.beginInterval(
+                "openDocument",
+                id: signposter.makeSignpostID(),
+                "bytes=\(bytes) ext=\(ext)"
+            )
+            defer { signposter.endInterval("openDocument", state) }
+
             DebugLog.info(.lifecycle, "ContentView.onAppear - \(fileURL?.lastPathComponent ?? "untitled") (\(document.text.count) chars)")
+            // DIAGNOSTIC: confirm whether signposts are enabled at runtime. Remove after debugging.
+            DebugLog.info(.lifecycle, "Signposts.lifecycle.isEnabled=\(Signposts.lifecycle.isEnabled) rendering.isEnabled=\(Signposts.rendering.isEnabled)")
             DebugLog.logMemory(.lifecycle, context: "Document open")
             setupDebouncing()
             updateHeadings(from: document.text)
@@ -194,7 +213,9 @@ struct ContentView: View {
             lintUpdatePublisher.send(newValue)
         }
         .onDisappear {
-            fileWatcher?.stop()
+            Signposts.interval("closeDocument", category: .lifecycle) {
+                fileWatcher?.stop()
+            }
         }
         .alert("File Changed", isPresented: $showExternalChangeAlert) {
             Button("Reload") { reloadFromDisk() }
@@ -531,12 +552,25 @@ struct ContentView: View {
         let cache = codeBlockMeasurementCache
         Task { await cache.clear() }
 
+        let renderingSignposter = Signposts.signposter(for: .rendering)
+
         // For small documents, render synchronously to avoid flicker
         if text.count < 50_000 {
             DebugLog.log(.rendering, "updateRenderedBlocks: sync path (\(text.count) chars)")
-            renderedBlocks = BlockRenderer.render(text, style: renderStyle)
+            // Signpost: renderBatch index=0 — sync path is one batch covering the full doc.
+            // parseMarkdown nests inside this interval (BlockRenderer.render emits it).
+            let state = renderingSignposter.beginInterval(
+                "renderBatch",
+                id: renderingSignposter.makeSignpostID(),
+                "index=0 mode=sync"
+            )
+            let blocks = BlockRenderer.render(text, style: renderStyle)
+            renderingSignposter.endInterval("renderBatch", state, "blocks=\(blocks.count)")
+
+            renderedBlocks = blocks
             reconfigureHeightIndex()
             prefetchCodeBlockMeasurements()
+            emitFirstPaintIfNeeded(blockCount: blocks.count)
             return
         }
 
@@ -555,9 +589,17 @@ struct ContentView: View {
         let firstChunkEnd = MarkdownChunker.findFirstChunkEnd(in: text)
         let firstChunk = String(text.prefix(firstChunkEnd))
 
+        // Signpost: renderBatch index=0 — initial progressive chunk.
+        let initialState = renderingSignposter.beginInterval(
+            "renderBatch",
+            id: renderingSignposter.makeSignpostID(),
+            "index=0 mode=initial"
+        )
         let initialBlocks = DebugLog.measure(.rendering, "Initial chunk (\(firstChunk.count) chars)") {
             BlockRenderer.render(firstChunk, style: style)
         }
+        renderingSignposter.endInterval("renderBatch", initialState, "blocks=\(initialBlocks.count)")
+
         renderedBlocks = initialBlocks
         reconfigureHeightIndex()
         // Kick off off-main measurement for the first chunk's code blocks
@@ -565,6 +607,7 @@ struct ContentView: View {
         // is usually done and large code blocks render at their authoritative
         // height from the first frame (no async post-layout height shift).
         prefetchCodeBlockMeasurements()
+        emitFirstPaintIfNeeded(blockCount: initialBlocks.count)
         DebugLog.log(.rendering, "  → Initial \(initialBlocks.count) blocks shown immediately")
 
         // If we rendered everything in the first chunk, we're done
@@ -578,13 +621,25 @@ struct ContentView: View {
         let remainingText = String(text.dropFirst(firstChunkEnd))
 
         renderTask = Task {
+            // Signpost: renderBatch index=1 — background continuation. The interval spans the
+            // detached parse + the main-actor append so the trace shows the full latency from
+            // "background work started" to "blocks visible".
+            let bgState = renderingSignposter.beginInterval(
+                "renderBatch",
+                id: renderingSignposter.makeSignpostID(),
+                "index=1 mode=background"
+            )
+
             let moreBlocks = await DebugLog.measureAsync(.rendering, "Background render (\(remainingText.count) chars)") {
                 await Task.detached(priority: .userInitiated) {
                     BlockRenderer.render(remainingText, style: style)
                 }.value
             }
 
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                renderingSignposter.endInterval("renderBatch", bgState, "blocks=0 cancelled=1")
+                return
+            }
 
             await MainActor.run {
                 DebugLog.log(.rendering, "Appending \(moreBlocks.count) blocks...")
@@ -601,8 +656,19 @@ struct ContentView: View {
                 // real work.
                 prefetchCodeBlockMeasurements()
                 DebugLog.logMemory(.perf, context: "After render complete")
+                renderingSignposter.endInterval("renderBatch", bgState, "blocks=\(moreBlocks.count)")
             }
         }
+    }
+
+    /// Emit the `firstPaint` signpost event once per document-open lifecycle. Called after the
+    /// first non-empty `renderedBlocks` assignment. The actual on-screen paint follows the
+    /// state mutation by ~1 SwiftUI frame; this is the closest hook without coupling into
+    /// LazyVStack's child lifecycle.
+    private func emitFirstPaintIfNeeded(blockCount: Int) {
+        guard !firstPaintFired, blockCount > 0 else { return }
+        firstPaintFired = true
+        Signposts.event("firstPaint", category: .rendering)
     }
 
     /// Dispatches off-main measurement for every large code block currently
@@ -912,6 +978,16 @@ struct ContentView: View {
 
     private func reloadFromDisk() {
         guard let url = fileURL else { return }
+
+        // Signpost is placed after the early-return guard so a 0-duration "no fileURL" case
+        // doesn't pollute the trace — only real reload work shows up on the timeline.
+        let signposter = Signposts.signposter(for: .lifecycle)
+        let state = signposter.beginInterval("reloadFromDisk")
+        defer { signposter.endInterval("reloadFromDisk", state) }
+
+        // Reset firstPaint guard so the post-reload render emits a fresh `firstPaint` event,
+        // paired with this `reloadFromDisk` interval per design.md.
+        firstPaintFired = false
 
         // Prefer NSDocument.revert so the reload does not mark the document dirty.
         // SwiftUI's DocumentGroup owns an NSDocument under the hood; revert re-reads

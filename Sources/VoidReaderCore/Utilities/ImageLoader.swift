@@ -19,35 +19,70 @@ public actor ImageLoader {
         let resolvedURL = resolveImageURL(source: source, documentURL: documentURL)
 
         guard let url = resolvedURL else {
+            // Skip signpost for unresolved URLs — no real load attempted.
             return nil
+        }
+
+        // Signpost: imageLoad — scheme attached at begin (known up front); bytes, cache
+        // status, and pixel dimensions attached at end (known once the load resolves).
+        // For cache hits, bytes=0 reflects "no fresh bytes loaded" — the original load
+        // already paid that cost on a prior call. Dimensions are useful for chasing
+        // "why is scrolling janky with images?" — large dims = large GPU upload cost.
+        let signposter = Signposts.signposter(for: .image)
+        let signpostID = signposter.makeSignpostID()
+        let scheme = url.scheme ?? "unknown"
+        let signpostState = signposter.beginInterval(
+            "imageLoad",
+            id: signpostID,
+            "scheme=\(scheme)"
+        )
+        var cacheStatus = "miss"
+        var loadedBytes = 0
+        var resolvedImage: NSImage?
+        defer {
+            let dims = resolvedImage.map { "\(Int($0.size.width))x\(Int($0.size.height))" } ?? "none"
+            signposter.endInterval(
+                "imageLoad",
+                signpostState,
+                "bytes=\(loadedBytes) cache=\(cacheStatus) dims=\(dims)"
+            )
         }
 
         let cacheKey = url.absoluteString
 
         // Check cache first
         if let cached = await cache.image(for: cacheKey) {
+            cacheStatus = "hit"
+            resolvedImage = cached
             return cached
         }
 
-        // Check if already loading
+        // Check if already loading — coalesce onto the existing task. Tagged distinctly
+        // from a true cache hit because this call still pays the latency of waiting for
+        // the in-flight fetch to complete.
         if let existingTask = inFlightTasks[cacheKey] {
-            return await existingTask.value
+            cacheStatus = "coalesced"
+            let coalesced = await existingTask.value
+            resolvedImage = coalesced
+            return coalesced
         }
 
         // Start new load task
-        let task = Task<NSImage?, Never> {
-            let image = await fetchImage(from: url)
-            if let image = image {
+        let task = Task<(NSImage?, Int), Never> {
+            let result = await fetchImage(from: url)
+            if let image = result.image {
                 await cache.store(image, for: cacheKey, isRemote: !url.isFileURL)
             }
-            return image
+            return (result.image, result.bytes)
         }
 
-        inFlightTasks[cacheKey] = task
-        let result = await task.value
+        inFlightTasks[cacheKey] = Task { await task.value.0 }
+        let (image, bytes) = await task.value
         inFlightTasks.removeValue(forKey: cacheKey)
 
-        return result
+        loadedBytes = bytes
+        resolvedImage = image
+        return image
     }
 
     /// Resolves an image source to a full URL.
@@ -73,11 +108,14 @@ public actor ImageLoader {
         return resolved
     }
 
-    /// Fetches an image from a URL.
-    private func fetchImage(from url: URL) async -> NSImage? {
+    /// Fetches an image from a URL. Returns both the image and the byte count actually
+    /// transferred (or, for local files, the file size on disk) — surfaced for signpost
+    /// metadata so traces can attribute load latency to image size.
+    private func fetchImage(from url: URL) async -> (image: NSImage?, bytes: Int) {
         if url.isFileURL {
             // Local file
-            return NSImage(contentsOf: url)
+            let bytes = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+            return (NSImage(contentsOf: url), bytes)
         } else {
             // Remote URL
             do {
@@ -88,13 +126,13 @@ public actor ImageLoader {
                     let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? ""
                     let validTypes = ["image/", "application/octet-stream"]
                     guard validTypes.contains(where: { contentType.contains($0) }) || httpResponse.statusCode == 200 else {
-                        return nil
+                        return (nil, data.count)
                     }
                 }
 
-                return NSImage(data: data)
+                return (NSImage(data: data), data.count)
             } catch {
-                return nil
+                return (nil, 0)
             }
         }
     }
