@@ -693,8 +693,15 @@ struct ContentView: View {
         let heightIndex = documentHeightIndex
 
         for (index, block) in blocks.enumerated() {
+            // Match the renderer's gate: any block whose *original* (pre-
+            // segmentation) size exceeds the threshold takes the NSTextView
+            // path and therefore needs its measurement warmed. Using the
+            // per-slice `code.count` here would miss every segment of a
+            // split block — they'd each show the placeholder on first paint
+            // and do their own late measurement, re-introducing the
+            // post-paint height shift this prefetch exists to prevent.
             guard case .codeBlock(let data) = block,
-                  data.code.count > CodeBlockView.maxSwiftUITextChars else { continue }
+                  data.originalBlockSize > CodeBlockView.maxSwiftUITextChars else { continue }
 
             CodeBlockMeasurementScheduler.enqueueIfNeeded(
                 code: data.code,

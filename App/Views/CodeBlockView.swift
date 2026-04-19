@@ -104,8 +104,16 @@ struct CodeBlockView: View {
     }
 
     /// Use the `NSTextView`-backed renderer instead of SwiftUI `Text`.
+    ///
+    /// Keyed on the *original* (pre-segmentation) block size, not `code.count`.
+    /// Segmented rows each hold only their slice (~800 lines / ~30KB), which
+    /// slips under the raw threshold — but the visual total is the full parent
+    /// block, which is exactly the "large" case this gate exists to catch.
+    /// Without this, a 200KB block split into 9 slices routes every slice
+    /// through SwiftUI `Text`, saturating the main thread with
+    /// `StyledTextLayoutEngine` / CoreText re-measurement during scroll.
     private var useNSTextView: Bool {
-        data.code.count > Self.maxSwiftUITextChars
+        data.originalBlockSize > Self.maxSwiftUITextChars
     }
 
     var body: some View {

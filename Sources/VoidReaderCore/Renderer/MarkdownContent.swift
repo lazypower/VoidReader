@@ -132,6 +132,15 @@ public struct CodeBlockData: Identifiable {
     /// True when this block is part of a segmented group.
     public var isSegmented: Bool { segment != nil }
 
+    /// Size of the logical (pre-segmentation) code block this row belongs to.
+    /// Equals `code.count` for ordinary blocks and `segment.fullCode.count` for
+    /// slices of a split block. Lets the view layer pick a renderer based on
+    /// the visual total rather than the per-row slice — the "large origin"
+    /// signal, independent of how segmentation chooses to slice.
+    public var originalBlockSize: Int {
+        segment?.fullCode.count ?? code.count
+    }
+
     /// True for the first segment (or any non-segmented block — non-segmented
     /// blocks render the badge + copy button just like a first segment does).
     public var isSegmentFirst: Bool { segment?.isFirst ?? true }
