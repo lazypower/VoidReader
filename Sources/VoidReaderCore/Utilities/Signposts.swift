@@ -14,14 +14,29 @@ import os.signpost
 /// `DebugLog`'s `com.voidreader.debug.*` so Instruments' subsystem filter can isolate signposts
 /// cleanly without pulling in DebugLog noise.
 ///
-/// The OSLog *category* matches the subsystem suffix (`rendering`, `lifecycle`, …) — these end
-/// up grouping signposts in Instruments' os_signpost summary view. We deliberately do NOT use
-/// the `"PointsOfInterest"` category: the built-in Points of Interest instrument has a hardcoded
-/// subsystem allowlist (only `com.apple.neappprivacy` and a handful of Apple subsystems are
-/// permitted to render in that lane), so routing our signposts there causes them to vanish from
-/// both the POI lane *and* the generic os_signpost lane (which filters POI out). This was
-/// learned empirically during the first profile run — see `make profile` in the Makefile, which
-/// adds the `os_signpost` instrument explicitly so per-domain categories surface in the trace.
+/// Every signposter uses OSLog's well-known `.pointsOfInterest` category. This is not cosmetic:
+/// Apple's signpost system treats POI and non-POI categories fundamentally differently:
+///
+/// - **POI category** — signposts are captured from *any* subsystem, always-on, surface in the
+///   built-in Points of Interest instrument and in the `os_signpost` lane, no configuration
+///   required.
+/// - **Any other category** — signposts fall under *dynamic tracing* rules. They are captured
+///   **only** when the emitting subsystem is explicitly opted into the os_signpost instrument's
+///   "Dynamic Tracing" allowlist (default: only `com.apple.neappprivacy`). `xctrace record` has
+///   no CLI option to add subsystems to that allowlist — the only ways in are (a) manually via
+///   Instruments GUI → File → Recording Options, or (b) shipping a custom Instruments Package
+///   with the subsystem declared.
+///
+/// Short version: "use a custom category" = "silent in Instruments under `xctrace record`."
+/// We've learned this twice. A previous commit routed to POI (correct), a follow-up "fix"
+/// reverted to per-domain categories based on folklore about a POI allowlist (there isn't one —
+/// the allowlist in the recording settings is for *dynamic tracing*, i.e. non-POI categories),
+/// and signposts silently vanished. See
+/// `openspec/changes/add-performance-instrumentation/FINDINGS_p2_signpost_surfacing.md` for the
+/// full diagnosis.
+///
+/// Per-domain grouping is carried by the *subsystem* identifier (`place.wabash.VoidReader.*`),
+/// not the category. Filter by subsystem in Instruments' detail pane to isolate a domain.
 ///
 /// ## Zero-Overhead Contract
 /// `OSSignposter` is designed to be effectively free when Instruments is not recording. Hot-loop
@@ -55,19 +70,19 @@ public enum Signposts {
 
     /// Signposter for the markdown rendering pipeline (`parseMarkdown`, `renderBatch`,
     /// `firstPaint`, `syntaxHighlightPass`).
-    public static let rendering = OSSignposter(subsystem: renderingSubsystem, category: "rendering")
+    public static let rendering = OSSignposter(subsystem: renderingSubsystem, category: .pointsOfInterest)
 
     /// Signposter for document lifecycle (`openDocument`, `closeDocument`, `reloadFromDisk`).
-    public static let lifecycle = OSSignposter(subsystem: lifecycleSubsystem, category: "lifecycle")
+    public static let lifecycle = OSSignposter(subsystem: lifecycleSubsystem, category: .pointsOfInterest)
 
     /// Signposter for scroll-loop signals (`scrollTick` event).
-    public static let scroll = OSSignposter(subsystem: scrollSubsystem, category: "scroll")
+    public static let scroll = OSSignposter(subsystem: scrollSubsystem, category: .pointsOfInterest)
 
     /// Signposter for mermaid diagram rendering (`mermaidRender`).
-    public static let mermaid = OSSignposter(subsystem: mermaidSubsystem, category: "mermaid")
+    public static let mermaid = OSSignposter(subsystem: mermaidSubsystem, category: .pointsOfInterest)
 
     /// Signposter for image loading (`imageLoad`).
-    public static let image = OSSignposter(subsystem: imageSubsystem, category: "image")
+    public static let image = OSSignposter(subsystem: imageSubsystem, category: .pointsOfInterest)
 
     // MARK: - Convenience API
 
