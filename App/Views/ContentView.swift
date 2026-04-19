@@ -87,6 +87,13 @@ struct ContentView: View {
     /// reader view tree via environment. Cleared on document change.
     @State private var codeBlockMeasurementCache = CodeBlockMeasurementCache()
 
+    /// Document-scoped cache of measured column widths / row heights for
+    /// large tables. Populated off-main by `prefetchTableMeasurements`
+    /// as soon as blocks arrive, and injected into the reader view tree via
+    /// environment. Cleared on document change. Mirrors the code-block
+    /// measurement cache pattern.
+    @State private var tableMeasurementCache = TableMeasurementCache()
+
     /// Authoritative document-wide height index. Sidesteps SwiftUI's
     /// `LazyVStack`-biased `GeometryReader`-reported content height (which
     /// grows as rows materialize) with a prefix-sum over per-block heights
@@ -551,6 +558,8 @@ struct ContentView: View {
         // forever if we don't evict. Fire-and-forget clear on the actor.
         let cache = codeBlockMeasurementCache
         Task { await cache.clear() }
+        let tableCache = tableMeasurementCache
+        Task { await tableCache.clear() }
 
         let renderingSignposter = Signposts.signposter(for: .rendering)
 
@@ -570,6 +579,7 @@ struct ContentView: View {
             renderedBlocks = blocks
             reconfigureHeightIndex()
             prefetchCodeBlockMeasurements()
+        prefetchTableMeasurements()
             emitFirstPaintIfNeeded(blockCount: blocks.count)
             return
         }
@@ -607,6 +617,7 @@ struct ContentView: View {
         // is usually done and large code blocks render at their authoritative
         // height from the first frame (no async post-layout height shift).
         prefetchCodeBlockMeasurements()
+        prefetchTableMeasurements()
         emitFirstPaintIfNeeded(blockCount: initialBlocks.count)
         DebugLog.log(.rendering, "  → Initial \(initialBlocks.count) blocks shown immediately")
 
@@ -655,6 +666,7 @@ struct ContentView: View {
                 // skips cache-hits, so only the newly-appended blocks produce
                 // real work.
                 prefetchCodeBlockMeasurements()
+        prefetchTableMeasurements()
                 DebugLog.logMemory(.perf, context: "After render complete")
                 renderingSignposter.endInterval("renderBatch", bgState, "blocks=\(moreBlocks.count)")
             }
@@ -715,6 +727,36 @@ struct ContentView: View {
                 // index so totalHeight stops under-reporting as rows
                 // outside the materialized window land their measurements.
                 heightIndex.recordHeight(result.height, at: index)
+            }
+        }
+    }
+
+    /// Dispatches off-main measurement for every large table currently in
+    /// `renderedBlocks`. Each enqueue is idempotent — cache hits
+    /// short-circuit without queueing work. Mirrors
+    /// `prefetchCodeBlockMeasurements`.
+    ///
+    /// The virtualization threshold matches
+    /// `TableBlockView.virtualizationThreshold` — below it, tables render
+    /// via SwiftUI `Grid` and don't need a pre-measured column-width pass.
+    private func prefetchTableMeasurements() {
+        let cache = tableMeasurementCache
+        let blocks = renderedBlocks
+
+        for block in blocks {
+            guard case .table(let data) = block,
+                  data.rows.count >= TableBlockView.virtualizationThreshold else { continue }
+
+            TableMeasurementScheduler.enqueueIfNeeded(
+                data: data,
+                bodyFontSize: 14,
+                headerFontSize: 14,
+                cache: cache
+            ) { _, _ in
+                // Intentionally empty — TableBlockView reads the cache via
+                // environment on `.onAppear` and swaps from placeholder to
+                // measured layout. No document-height feedback needed: the
+                // placeholder is already at the authoritative total height.
             }
         }
     }
@@ -1076,6 +1118,7 @@ struct ContentView: View {
                             onMermaidExpand: handleMermaidExpand
                         )
                         .environment(\.codeBlockMeasurementCache, codeBlockMeasurementCache)
+                        .environment(\.tableMeasurementCache, tableMeasurementCache)
                         .environment(\.documentHeightIndex, documentHeightIndex)
                         .environment(\.onImageExpand, handleImageExpand)
                         .environment(\.openURL, OpenURLAction { url in
@@ -1346,6 +1389,7 @@ struct ContentView: View {
                         onMermaidExpand: handleMermaidExpand
                     )
                     .environment(\.codeBlockMeasurementCache, codeBlockMeasurementCache)
+                    .environment(\.tableMeasurementCache, tableMeasurementCache)
                     .environment(\.documentHeightIndex, documentHeightIndex)
                     .environment(\.onImageExpand, handleImageExpand)
                     .environment(\.openURL, OpenURLAction { url in
