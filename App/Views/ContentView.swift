@@ -1045,6 +1045,13 @@ struct ContentView: View {
                         // Anchor at top for scroll restoration
                         Color.clear.frame(height: 1).id("top")
 
+                        #if DEBUG
+                        // Debug-only: programmatic autoscroll driver for
+                        // profile runs. No-ops unless VOID_READER_AUTOSCROLL=1.
+                        ScrollAutoDriver()
+                            .frame(width: 0, height: 0)
+                        #endif
+
                         MarkdownReaderViewWithAnchors(
                             text: document.text,
                             headings: headings,
