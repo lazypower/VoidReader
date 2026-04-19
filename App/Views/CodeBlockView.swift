@@ -3,7 +3,9 @@ import VoidReaderCore
 import Highlightr
 import AppKit
 
-/// Shared highlighter instance for performance.
+/// Shared highlighter instance for the small-block path. The large-block path
+/// uses `CodeBlockMeasurementScheduler.highlighter` for the same reason (single
+/// shared instance + single queue for JSContext thread affinity).
 private let highlightr: Highlightr? = {
     let h = Highlightr()
     return h
@@ -11,48 +13,42 @@ private let highlightr: Highlightr? = {
 
 /// Renders a code block with syntax highlighting and copy button.
 ///
-/// ## Threading
-/// `Highlightr` runs JavaScript inside a `JSContext` and was previously called
-/// synchronously on the main thread, which beachballed the UI for ~5s per
-/// ~1.5MB block while highlight.js chewed through tokens. Highlight work now
-/// runs on `highlightQueue` (a dedicated serial queue — `Highlightr`'s
-/// `JSContext` has thread affinity, so every call to the shared instance must
-/// funnel through one thread) and the result is published back to the view's
-/// `@State` on the main thread. Brief plain-text flash on first appear is the
-/// accepted tradeoff.
+/// ## Two rendering paths
+/// - **Small blocks** (< `maxSwiftUITextChars`): SwiftUI `Text` with off-main
+///   highlighting via `Highlightr`. `Text` sizes itself; no measurement needed.
+/// - **Large blocks** (≥ `maxSwiftUITextChars`): `NSTextView` (TextKit)
+///   inside a fixed-height frame. The frame height comes from an off-main
+///   measurement performed before the view ever commits to a layout. This
+///   eliminates the async height-mutation cycle that caused scroll-position
+///   drift near the end of large documents.
 ///
-/// ## Large blocks
-/// SwiftUI `Text` cannot lay out multi-MB strings during lazy scroll layout
-/// without blocking the main thread (independent of any highlighting). Above
-/// `maxHighlightableChars`, the content area swaps to `CodeTextView`
-/// (`NSTextView` via `NSViewRepresentable`), which uses TextKit and handles
-/// arbitrary sizes cleanly. Above-threshold blocks render plain monospaced —
-/// matching highlighting would require streaming/chunked highlight that's out
-/// of scope for this fix.
+/// ## Why measure off-main first
+/// `NSTextView`'s TextKit layout for multi-line code is cheap (~ms), but
+/// `usedRect(for:)` can only be read after `ensureLayout`. Historically we
+/// called this on a live `NSTextView` inside `makeNSView` and published the
+/// height back via `@Binding` — SwiftUI laid the row out once at a
+/// placeholder height, then again at the real height when the bridge fired.
+/// Repeated across hundreds of blocks in a large doc, the cumulative height
+/// shift made scroll-percentage math unstable. The measure-first design
+/// renders at a known-stable height from the first frame.
 struct CodeBlockView: View {
     /// Threshold above which we switch the view path to `NSTextView`.
     /// SwiftUI `Text` computes intrinsic content size eagerly over the full
-    /// string before it can measure its frame — so large blocks beachball on
-    /// initial paint, independent of whether the content is plain or
-    /// highlighted. TextKit (NSTextView) lays out lazily per line fragment
-    /// and handles any size cleanly. 50KB is a conservative knee that keeps
-    /// normal-sized code blocks on the SwiftUI path while routing anything
-    /// meaningfully large to TextKit. This is a *layout* concern, separate
-    /// from the highlight ceiling below.
-    private static let maxSwiftUITextChars = 50_000
+    /// string — fine for typical code, beachballs for large blocks. 50KB
+    /// is the empirical knee. This is a *layout* threshold, distinct from
+    /// `maxHighlightChars` below.
+    static let maxSwiftUITextChars = 50_000
 
-    /// Safety ceiling on highlight work itself. Empirically, the highlighted
+    /// Safety ceiling on highlight work. The highlighted
     /// `NSAttributedString` weighs ~160x the raw bytes (attribute runs per
-    /// token + retained JSC heap). A 3MB block highlighted costs ~490MB of
-    /// RAM. 1MB caps single-block cost at ~160MB — chunky but tolerable —
-    /// while still covering every realistic hand-written block. Multi-block
-    /// docs pay this tax per block, so truly large pasted/generated content
-    /// stays plain intentionally.
-    private static let maxHighlightChars = 1_000_000
+    /// token + retained JSC heap). 1MB caps single-block cost at ~160MB —
+    /// chunky but tolerable — while still covering every realistic
+    /// hand-written block. See `CodeBlockMeasurement.maxHighlightChars`
+    /// which mirrors this on the off-main path.
+    static let maxHighlightChars = 1_000_000
 
-    /// Dedicated queue for `Highlightr` work. `JSContext` has thread affinity,
-    /// so every call to the shared `highlightr` instance must run on this
-    /// queue.
+    /// Dedicated queue for the small-block highlight path.  Large blocks
+    /// route through `CodeBlockMeasurementScheduler.queue` instead.
     private static let highlightQueue = DispatchQueue(
         label: "place.wabash.VoidReader.highlight",
         qos: .userInitiated
@@ -61,16 +57,40 @@ struct CodeBlockView: View {
     let data: CodeBlockData
     var fontSize: CGFloat = 13
     var fontFamily: String? = nil  // nil = system mono
+
+    /// Document-scoped measurement cache, injected via `.environment(\.codeBlockMeasurementCache, ...)`.
+    /// `nil` in previews — large-block path falls back to direct on-demand
+    /// measurement without a shared cache (still works, just no prefetch benefit).
+    @Environment(\.codeBlockMeasurementCache) private var measurementCache
     @State private var showCopied = false
+    // Small-block path state
     @State private var cachedHighlight: AttributedString?
     @State private var cacheKey: String = ""
     @State private var requestSeq: Int = 0
-    @State private var nsTextHeight: CGFloat = 0
+    // Large-block path state: the authoritative (attributed, height) pair
+    // delivered by the measurement cache. `nil` while measurement is in
+    // flight (placeholder shown).
+    @State private var measurement: CodeBlockMeasurementResult?
     @Environment(\.colorScheme) private var colorScheme
 
     // Theme config - single point to change later
     private var themeName: String {
+        Self.themeName(for: colorScheme)
+    }
+
+    /// Maps SwiftUI `ColorScheme` to the `Highlightr` theme name. Exposed as
+    /// a static helper so prefetch paths (in `ContentView`) can resolve the
+    /// same theme without re-instantiating a view.
+    static func themeName(for colorScheme: ColorScheme) -> String {
         colorScheme == .dark ? "atom-one-dark" : "atom-one-light"
+    }
+
+    /// Same font resolution as the instance property, exposed for prefetch.
+    static func nsFont(family: String?, size: CGFloat) -> NSFont {
+        if let family, let font = NSFont(name: family, size: size) {
+            return font
+        }
+        return NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
     }
 
     // Badge font scales with code font
@@ -80,22 +100,12 @@ struct CodeBlockView: View {
 
     // Resolve font family to NSFont
     private var nsFont: NSFont {
-        if let family = fontFamily, let font = NSFont(name: family, size: fontSize) {
-            return font
-        }
-        return NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        Self.nsFont(family: fontFamily, size: fontSize)
     }
 
-    /// Use the `NSTextView`-backed renderer instead of SwiftUI `Text` — purely
-    /// a layout decision. Highlighting still runs for these blocks (up to
-    /// `maxHighlightChars`), and the result is piped into the text view.
+    /// Use the `NSTextView`-backed renderer instead of SwiftUI `Text`.
     private var useNSTextView: Bool {
         data.code.count > Self.maxSwiftUITextChars
-    }
-
-    /// Whether this block is small enough to attempt highlighting at all.
-    private var canHighlight: Bool {
-        data.code.count <= Self.maxHighlightChars
     }
 
     var body: some View {
@@ -138,47 +148,76 @@ struct CodeBlockView: View {
         }
         .background(Color(nsColor: .quaternaryLabelColor).opacity(0.3))
         .cornerRadius(8)
-        .onAppear { updateHighlightCache() }
-        .onChange(of: colorScheme) { _, _ in updateHighlightCache() }
+        .onAppear {
+            DebugLog.log(.rendering, "CodeBlockView.onAppear: size=\(data.code.count) useNSTextView=\(useNSTextView)")
+            onAppearOrInvalidate()
+        }
+        .onChange(of: colorScheme) { _, _ in onAppearOrInvalidate() }
         .onDisappear {
-            // Drop the cached highlight when the block scrolls out of the
-            // lazy viewport. LazyVStack usually tears down rows off-screen
-            // (which releases @State anyway), but SwiftUI can keep views
-            // around briefly for reuse — explicit eviction ensures the
-            // attributed string's memory is reclaimed promptly. On re-appear,
-            // `onAppear` + the `key != cacheKey` check re-enqueues highlight
-            // work; the stale-result guard in `updateHighlightCache` handles
-            // fast back-and-forth scrolling without incorrect output.
+            DebugLog.log(.rendering, "CodeBlockView.onDisappear: size=\(data.code.count) had_measurement=\(measurement != nil)")
+            // Drop @State-local caches when the block scrolls out. The
+            // shared `measurementCache` stays warm — so re-entry re-resolves
+            // from the cache with zero extra work (no highlight, no
+            // re-measure, no visible swap).
             cachedHighlight = nil
             cacheKey = ""
+            measurement = nil
         }
     }
 
     @ViewBuilder
     private var codeContent: some View {
         if useNSTextView {
-            // Above layout threshold: NSTextView wraps its own NSScrollView
-            // for horizontal panning, so we don't nest in a SwiftUI
-            // ScrollView. Height is bridged from TextKit's used rect via
-            // @State. Highlighted AttributedString is piped in when it lands
-            // from the off-main highlight queue — initial paint is plain and
-            // swaps when ready ("pop-in").
+            largeBlockContent
+        } else {
+            smallBlockContent
+        }
+    }
+
+    @ViewBuilder
+    private var largeBlockContent: some View {
+        if let measurement {
+            // Authoritative render path. Frame height is exactly what
+            // TextKit will lay out, so there's no post-paint shift.
             CodeTextView(
                 text: data.code,
                 font: nsFont,
-                highlighted: cachedHighlight,
-                contentHeight: $nsTextHeight
+                highlighted: measurement.attributed
             )
-            .frame(height: max(nsTextHeight, fontSize + 16))
+            .frame(height: measurement.height)
             .padding(12)
         } else {
-            // Below threshold: SwiftUI Text + Highlightr (off-main).
-            ScrollView(.horizontal, showsIndicators: false) {
-                highlightedCode
-                    .textSelection(.enabled)
-                    .padding(12)
-            }
+            // Placeholder while measurement is in flight. Deterministic,
+            // non-zero height so the LazyVStack row has a predictable
+            // footprint — not "exactly right," but stable. On measurement
+            // landing we swap once to the authoritative height.
+            Color.clear
+                .frame(height: placeholderHeight)
+                .padding(12)
         }
+    }
+
+    @ViewBuilder
+    private var smallBlockContent: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            highlightedCode
+                .textSelection(.enabled)
+                .padding(12)
+        }
+    }
+
+    /// Deterministic placeholder height for the large-block gate. Uses the
+    /// font's line metrics × newline count — not perfectly equal to
+    /// TextKit's measured height (paragraph spacing, leading quirks), but
+    /// stable for a given (code, font, size) tuple, which is what matters
+    /// during the brief measurement window.
+    private var placeholderHeight: CGFloat {
+        var lineCount = 1
+        for char in data.code where char == "\n" {
+            lineCount += 1
+        }
+        let lineHeight = ceil(nsFont.ascender - nsFont.descender + nsFont.leading)
+        return CGFloat(lineCount) * lineHeight
     }
 
     /// Key that invalidates the highlight cache when inputs change.
@@ -199,8 +238,70 @@ struct CodeBlockView: View {
         if let highlighted = cachedHighlight {
             Text(highlighted).font(swiftUIFont)
         } else {
-            // Shown briefly while off-main highlight runs (or if it failed).
             Text(data.code).font(swiftUIFont)
+        }
+    }
+
+    /// Router — called on appear and on any input change that could
+    /// invalidate the cache (color scheme flip, re-entry after disappear).
+    /// Each path is idempotent: cached results short-circuit immediately.
+    private func onAppearOrInvalidate() {
+        if useNSTextView {
+            requestMeasurement()
+        } else {
+            updateHighlightCache()
+        }
+    }
+
+    /// Resolve the block's measurement from the document-scoped cache.
+    /// Cache hit → immediate render at authoritative height. Miss → enqueue
+    /// off-main work; placeholder renders until result lands on main.
+    private func requestMeasurement() {
+        DebugLog.log(.rendering, "CodeBlockView.requestMeasurement: size=\(data.code.count) cache=\(measurementCache != nil)")
+        guard let cache = measurementCache else { return }
+        let fontName = fontFamily ?? ""
+        let key = CodeBlockMeasurementKey(
+            code: data.code,
+            fontName: fontName,
+            fontSize: fontSize,
+            themeName: themeName
+        )
+
+        // Fast cache-hit path: avoid dispatching anything if the prefetch
+        // has already measured this block.
+        Task {
+            if let existing = await cache.get(key) {
+                DebugLog.log(.rendering, "CodeBlockView.requestMeasurement: cache HIT, setting measurement h=\(existing.height)")
+                await MainActor.run { measurement = existing }
+                return
+            }
+            DebugLog.log(.rendering, "CodeBlockView.requestMeasurement: cache MISS, enqueuing")
+
+            CodeBlockMeasurementScheduler.enqueueIfNeeded(
+                code: data.code,
+                language: data.language,
+                fontName: fontName,
+                fontSize: fontSize,
+                themeName: themeName,
+                cache: cache
+            ) { resultKey, result in
+                DebugLog.log(.rendering, "CodeBlockView.requestMeasurement: onComplete fired h=\(result.height)")
+                // Stale-result guard: if color scheme / font / content
+                // changed between dispatch and completion, the key will no
+                // longer match the view's current state — drop the result.
+                let currentKey = CodeBlockMeasurementKey(
+                    code: data.code,
+                    fontName: fontFamily ?? "",
+                    fontSize: fontSize,
+                    themeName: themeName
+                )
+                guard resultKey == currentKey else {
+                    DebugLog.log(.rendering, "CodeBlockView.requestMeasurement: STALE KEY, dropping")
+                    return
+                }
+                measurement = result
+                DebugLog.log(.rendering, "CodeBlockView.requestMeasurement: measurement set")
+            }
         }
     }
 
@@ -209,37 +310,24 @@ struct CodeBlockView: View {
         guard key != cacheKey else { return }
 
         // Skip only truly pathological sizes — everything else attempts
-        // highlighting and pops in when ready. Layout path is chosen
-        // separately via `useNSTextView`.
-        guard canHighlight else { return }
+        // highlighting and pops in when ready.
+        guard data.code.count <= Self.maxHighlightChars else { return }
 
         guard highlightr != nil else { return }
 
-        // Snapshot inputs for the background closure — `self` is a struct, so
-        // these are stable copies. Writes go back through @State on main.
         let codeSnapshot = data.code
         let language = data.language?.lowercased()
         let theme = themeName
 
-        // Stale-result guard: bump a monotonic counter on each dispatch and
-        // compare on apply. If a newer request landed first (e.g. user toggled
-        // dark mode while the previous highlight was still running), discard.
         requestSeq &+= 1
         let mySeq = requestSeq
 
         Self.highlightQueue.async {
-            // JSContext access — must be on this queue.
             guard let highlightr = highlightr else { return }
             highlightr.setTheme(to: theme)
             guard let nsAttr = highlightr.highlight(codeSnapshot, as: language) else { return }
 
-            // Attribute diet: keep only `.foregroundColor` runs. Font is
-            // applied externally (via `swiftUIFont` modifier on the SwiftUI
-            // path, and `textView.font` on the NSTextView path). Dropping
-            // per-run font attributes lets NSAttributedString coalesce
-            // adjacent runs that share a color — a big memory win for
-            // token-dense code, where highlight.js emits one run per
-            // identifier/keyword.
+            // Attribute diet, same as the measurement path.
             let slim = NSMutableAttributedString(string: nsAttr.string)
             let fullRange = NSRange(location: 0, length: nsAttr.length)
             nsAttr.enumerateAttribute(.foregroundColor, in: fullRange, options: []) { value, range, _ in
@@ -273,21 +361,39 @@ struct CodeBlockView: View {
     }
 }
 
+// MARK: - Scroll forwarding
+
+/// `NSScrollView` that handles horizontal wheel events itself but forwards
+/// vertical-dominant events up the responder chain. Without this, the outer
+/// SwiftUI `ScrollView` can't receive scroll gestures that start over a
+/// large code block — AppKit's default behavior lets the inner scroll view
+/// swallow every wheel event, even when it has no vertical content to scroll.
+private final class HorizontalOnlyScrollView: NSScrollView {
+    override func scrollWheel(with event: NSEvent) {
+        if abs(event.scrollingDeltaX) < abs(event.scrollingDeltaY) {
+            nextResponder?.scrollWheel(with: event)
+        } else {
+            super.scrollWheel(with: event)
+        }
+    }
+}
+
 // MARK: - NSTextView wrapper for large code blocks
 
-/// AppKit-backed code renderer for large blocks where SwiftUI `Text` would
-/// block the main thread during layout. Wraps `NSTextView` inside an
-/// `NSScrollView` configured for horizontal scrolling with no word wrap, so
-/// long lines pan instead of wrapping (matching the SwiftUI path's behavior).
-/// Reports its laid-out height back to the SwiftUI parent via `contentHeight`
-/// so the parent `LazyVStack` row sizes correctly.
+/// AppKit-backed code renderer for large blocks. Previously bridged its
+/// computed height back to SwiftUI via `@Binding`; now consumes a
+/// parent-supplied fixed frame and never mutates height after paint.
+///
+/// Measurement happens off-main (see `CodeBlockMeasurement`) using a
+/// detached TextKit stack built by `CodeBlockLayoutConfig`. This view
+/// configures its own container identically so the measured height and
+/// the rendered height agree by construction.
 private struct CodeTextView: NSViewRepresentable {
     let text: String
     let font: NSFont
-    /// Optional highlighted result from the off-main highlight queue. When
-    /// present, used instead of the plain-font attributed string.
+    /// Highlighted result from the measurement cache, or `nil` for blocks
+    /// above the highlight ceiling (rendered as plain monospaced).
     let highlighted: AttributedString?
-    @Binding var contentHeight: CGFloat
 
     final class Coordinator {
         var lastTextHash: Int = 0
@@ -298,12 +404,14 @@ private struct CodeTextView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSScrollView()
+        let scrollView = HorizontalOnlyScrollView()
         scrollView.hasVerticalScroller = false
         scrollView.hasHorizontalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
+        // Prevent AppKit bounce from consuming vertical wheel events
+        scrollView.verticalScrollElasticity = .none
 
         let textView = NSTextView()
         textView.isEditable = false
@@ -312,8 +420,6 @@ private struct CodeTextView: NSViewRepresentable {
         textView.font = font
         textView.textColor = .textColor
 
-        // Let content grow horizontally beyond the viewport so the scroll view
-        // pans rather than wrapping long lines.
         textView.isHorizontallyResizable = true
         textView.isVerticallyResizable = true
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
@@ -321,12 +427,7 @@ private struct CodeTextView: NSViewRepresentable {
         textView.autoresizingMask = [.width]
 
         if let container = textView.textContainer {
-            container.widthTracksTextView = false
-            container.containerSize = NSSize(
-                width: CGFloat.greatestFiniteMagnitude,
-                height: CGFloat.greatestFiniteMagnitude
-            )
-            container.lineFragmentPadding = 0
+            CodeBlockLayoutConfig.apply(to: container)
         }
 
         scrollView.documentView = textView
@@ -339,9 +440,9 @@ private struct CodeTextView: NSViewRepresentable {
         applyText(to: textView, coordinator: context.coordinator)
     }
 
-    /// Set text + font on the NSTextView and report computed height to SwiftUI.
-    /// Deduped via the coordinator so SwiftUI's frequent `updateNSView` calls
-    /// don't re-set multi-MB attributedStrings on every pass.
+    /// Set text + font on the NSTextView. Deduped via the coordinator so
+    /// SwiftUI's frequent `updateNSView` calls don't re-set multi-MB
+    /// attributed strings on every pass.
     private func applyText(to textView: NSTextView, coordinator: Coordinator) {
         let textHash = text.hashValue
         let highlightHash = highlighted?.hashValue ?? 0
@@ -354,11 +455,8 @@ private struct CodeTextView: NSViewRepresentable {
         textView.font = font
         let attributed: NSAttributedString
         if let highlighted {
-            // Highlighted path — font is already baked in by the highlight
-            // queue's font-merge pass.
             attributed = NSAttributedString(highlighted)
         } else {
-            // Plain path (initial paint, or blocks above `maxHighlightChars`).
             attributed = NSAttributedString(
                 string: text,
                 attributes: [
@@ -372,23 +470,6 @@ private struct CodeTextView: NSViewRepresentable {
         coordinator.lastTextHash = textHash
         coordinator.lastFont = font
         coordinator.lastHighlightHash = highlightHash
-
-        // Force layout so usedRect reflects actual content, then bridge the
-        // height back. ensureLayout on TextKit is significantly faster than
-        // SwiftUI Text's intrinsic-size path for large strings — that's the
-        // whole reason this view exists. Async to avoid mutating SwiftUI state
-        // mid-update (would log purple warnings in debug builds).
-        if let layoutManager = textView.layoutManager,
-           let textContainer = textView.textContainer {
-            layoutManager.ensureLayout(for: textContainer)
-            let used = layoutManager.usedRect(for: textContainer)
-            let newHeight = ceil(used.height)
-            DispatchQueue.main.async {
-                if abs(contentHeight - newHeight) > 0.5 {
-                    contentHeight = newHeight
-                }
-            }
-        }
     }
 }
 

@@ -77,6 +77,20 @@ struct ContentView: View {
     @State private var isRendering = false
     @State private var renderTask: Task<Void, Never>?
 
+    /// Document-scoped cache of TextKit-measured `(attributed, height)`
+    /// for large code blocks. Populated off-main by `prefetchCodeBlockMeasurements`
+    /// as soon as blocks arrive from the parser, and injected into the
+    /// reader view tree via environment. Cleared on document change.
+    @State private var codeBlockMeasurementCache = CodeBlockMeasurementCache()
+
+    /// Authoritative document-wide height index. Sidesteps SwiftUI's
+    /// `LazyVStack`-biased `GeometryReader`-reported content height (which
+    /// grows as rows materialize) with a prefix-sum over per-block heights
+    /// — measured where we have them, fallback-estimated otherwise. This
+    /// is what `updateScrollPercent` divides by, so the percentage no
+    /// longer jumps when the user scrolls into unmaterialized regions.
+    @StateObject private var documentHeightIndex = DocumentHeightIndex()
+
     // Lint warnings
     @State private var lintWarnings: [LintWarning] = []
     @State private var lintUpdatePublisher = PassthroughSubject<String, Never>()
@@ -509,10 +523,20 @@ struct ContentView: View {
         // Cancel any in-progress render
         renderTask?.cancel()
 
+        // Invalidate the measurement cache. Cache keys encode font, size,
+        // and theme — any re-render implies one of these changed, the
+        // document content changed, or both. Stale entries are harmless
+        // at query time (new keys won't collide) but they consume memory
+        // forever if we don't evict. Fire-and-forget clear on the actor.
+        let cache = codeBlockMeasurementCache
+        Task { await cache.clear() }
+
         // For small documents, render synchronously to avoid flicker
         if text.count < 50_000 {
             DebugLog.log(.rendering, "updateRenderedBlocks: sync path (\(text.count) chars)")
             renderedBlocks = BlockRenderer.render(text, style: renderStyle)
+            reconfigureHeightIndex()
+            prefetchCodeBlockMeasurements()
             return
         }
 
@@ -535,6 +559,12 @@ struct ContentView: View {
             BlockRenderer.render(firstChunk, style: style)
         }
         renderedBlocks = initialBlocks
+        reconfigureHeightIndex()
+        // Kick off off-main measurement for the first chunk's code blocks
+        // immediately — by the time the user starts scrolling, the prefetch
+        // is usually done and large code blocks render at their authoritative
+        // height from the first frame (no async post-layout height shift).
+        prefetchCodeBlockMeasurements()
         DebugLog.log(.rendering, "  → Initial \(initialBlocks.count) blocks shown immediately")
 
         // If we rendered everything in the first chunk, we're done
@@ -564,9 +594,79 @@ struct ContentView: View {
                 DebugLog.log(.rendering, "Block append took \(String(format: "%.2f", assignTime))ms")
                 DebugLog.log(.rendering, "  → Total \(renderedBlocks.count) blocks")
                 isRendering = false
+                reconfigureHeightIndex()
+                // Prefetch measurements for the full block list — the first
+                // chunk already kicked off its own; this re-runs and fast-path
+                // skips cache-hits, so only the newly-appended blocks produce
+                // real work.
+                prefetchCodeBlockMeasurements()
                 DebugLog.logMemory(.perf, context: "After render complete")
             }
         }
+    }
+
+    /// Dispatches off-main measurement for every large code block currently
+    /// in `renderedBlocks`. Each enqueue is idempotent — cache hits
+    /// short-circuit without touching the measurement queue — so calling
+    /// this multiple times as the block list grows is safe.
+    ///
+    /// Large-block threshold matches `CodeBlockView.maxSwiftUITextChars`.
+    /// Small blocks are not prefetched because they render on SwiftUI
+    /// `Text`'s intrinsic-sizing path, which doesn't have the async
+    /// height-shift problem this cache solves.
+    ///
+    /// On completion (including cache-hit fast path), each measurement is
+    /// also recorded into `documentHeightIndex` at the block's index so
+    /// the prefix-sum totalHeight converges to the authoritative value.
+    private func prefetchCodeBlockMeasurements() {
+        let fontFamily = resolvedCodeFontFamily
+        let fontSize = CGFloat(readerFontSize * 0.875)
+        let themeName = CodeBlockView.themeName(for: effectiveColorScheme)
+        let cache = codeBlockMeasurementCache
+        let blocks = renderedBlocks
+        let heightIndex = documentHeightIndex
+
+        for (index, block) in blocks.enumerated() {
+            guard case .codeBlock(let data) = block,
+                  data.code.count > CodeBlockView.maxSwiftUITextChars else { continue }
+
+            DebugLog.log(.rendering, "prefetch: enqueueing block \(index) size=\(data.code.count) fontName='\(fontFamily ?? "")' themeName='\(themeName)'")
+            CodeBlockMeasurementScheduler.enqueueIfNeeded(
+                code: data.code,
+                language: data.language,
+                fontName: fontFamily ?? "",
+                fontSize: fontSize,
+                themeName: themeName,
+                cache: cache
+            ) { _, result in
+                // Feed the authoritative height into the document-wide
+                // index so totalHeight stops under-reporting as rows
+                // outside the materialized window land their measurements.
+                DebugLog.log(.rendering, "prefetch: measurement landed for block \(index) h=\(result.height)")
+                heightIndex.recordHeight(result.height, at: index)
+            }
+        }
+    }
+
+    /// Reset the document height index for the current block list. Called
+    /// on every `renderedBlocks` assignment. The fallback closure captures
+    /// the current block array and code-font line metrics; re-running this
+    /// for a superset of blocks invalidates prior measurements — which is
+    /// fine because the cache still holds them and the prefetch re-fires
+    /// and re-records (cheap: cache hits, no TextKit work).
+    private func reconfigureHeightIndex() {
+        let codeFont = CodeBlockView.nsFont(
+            family: resolvedCodeFontFamily,
+            size: CGFloat(readerFontSize * 0.875)
+        )
+        documentHeightIndex.configure(
+            blockCount: renderedBlocks.count,
+            blockSpacing: 16,
+            fallback: DocumentHeightIndex.defaultFallback(
+                for: renderedBlocks,
+                codeFont: codeFont
+            )
+        )
     }
 
     private func scrollToHeading(_ heading: HeadingInfo) {
@@ -880,6 +980,8 @@ struct ContentView: View {
                             onScrollProgress: handleScrollProgress,
                             onMermaidExpand: handleMermaidExpand
                         )
+                        .environment(\.codeBlockMeasurementCache, codeBlockMeasurementCache)
+                        .environment(\.documentHeightIndex, documentHeightIndex)
                         .environment(\.onImageExpand, handleImageExpand)
                         .environment(\.openURL, OpenURLAction { url in
                             return handleLinkClick(url)
@@ -959,6 +1061,14 @@ struct ContentView: View {
                 guard !isRendering, !searchMatches.isEmpty else { return }
                 scrollToMatch(0, proxy: proxy)
             }
+            .onChange(of: documentHeightIndex.totalHeight) { _, _ in
+                // As per-block measurements land out of order (prefetch
+                // storm → serialized rebuild), totalHeight walks toward
+                // its final value. Rerun the percent math each time so
+                // the status bar tracks the authoritative number rather
+                // than the stale first-build estimate.
+                updateScrollPercent(offset: scrollOffsetForPercent)
+            }
         }
         .frame(maxWidth: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
@@ -1003,7 +1113,14 @@ struct ContentView: View {
         }
     }
 
-    /// Update scroll percentage based on scroll offset
+    /// Update scroll percentage based on scroll offset.
+    ///
+    /// Denominator comes from `documentHeightIndex.totalHeight` — the
+    /// prefix-sum over per-block heights — not from SwiftUI's
+    /// `GeometryReader`-reported content height. The latter under-reports
+    /// when `LazyVStack` hasn't materialized later rows, which was causing
+    /// the scroll % to saturate at 100% partway through large docs
+    /// (symptom: "jumps from 52% to 100% as I scroll down").
     private func updateScrollPercent(offset: CGFloat) {
         // Store offset for later recalculation when dimensions change
         scrollOffsetForPercent = offset
@@ -1011,11 +1128,11 @@ struct ContentView: View {
         // Skip if in edit mode
         guard !isEditMode else { return }
 
-        let percent = ScrollPercentage.calculate(
+        let fraction = documentHeightIndex.scrollFraction(
             offset: offset,
-            contentHeight: contentHeight,
             visibleHeight: visibleHeight
         )
+        let percent = Int((fraction * 100).rounded())
 
         // Only update if changed
         if percent != displayedPercentRead {
@@ -1133,6 +1250,8 @@ struct ContentView: View {
                         onTaskToggle: handleTaskToggle,
                         onMermaidExpand: handleMermaidExpand
                     )
+                    .environment(\.codeBlockMeasurementCache, codeBlockMeasurementCache)
+                    .environment(\.documentHeightIndex, documentHeightIndex)
                     .environment(\.onImageExpand, handleImageExpand)
                     .environment(\.openURL, OpenURLAction { url in
                         return handleLinkClick(url)
