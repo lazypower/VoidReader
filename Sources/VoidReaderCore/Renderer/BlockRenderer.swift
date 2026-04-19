@@ -5,6 +5,59 @@ import SwiftUI
 /// Renders markdown to an array of content blocks, supporting tables and task lists.
 public struct BlockRenderer {
 
+    /// Line count above which a fenced code block is split into multiple
+    /// `CodeSegment`-bearing `.codeBlock` entries. At typical code font
+    /// metrics (~16pt line height), 800 lines ≈ 12,800pt — well under the
+    /// SwiftUI `ScrollView` hit-test ceiling (~50k pt) that pathological
+    /// single blocks were crossing. Below the threshold, the block renders
+    /// as a single row exactly as before.
+    public static let segmentationLineThreshold = 800
+
+    /// Split a code block's raw source into `segmentationLineThreshold`-line
+    /// slices, joined by a shared `groupID`. Returns a single-element array
+    /// for blocks under the threshold (no segment metadata attached).
+    static func segmentCodeBlock(code: String, language: String?) -> [CodeBlockData] {
+        // Split on newlines. `components(separatedBy:)` collapses well with
+        // the "no trailing newline" case (last element is empty string if
+        // the code ends in \n). We handle both.
+        let lines = code.components(separatedBy: "\n")
+        guard lines.count > segmentationLineThreshold else {
+            return [CodeBlockData(code: code, language: language)]
+        }
+
+        let groupID = UUID()
+        let fullCode = code
+        var segments: [CodeBlockData] = []
+        var start = 0
+        let perSegment = segmentationLineThreshold
+
+        while start < lines.count {
+            let end = min(start + perSegment, lines.count)
+            let slice = lines[start..<end].joined(separator: "\n")
+            segments.append(CodeBlockData(
+                code: slice,
+                language: language,
+                segment: nil  // placeholder; filled in below once total is known
+            ))
+            start = end
+        }
+
+        let total = segments.count
+        for i in 0..<total {
+            segments[i] = CodeBlockData(
+                code: segments[i].code,
+                language: language,
+                segment: CodeSegment(
+                    groupID: groupID,
+                    indexInGroup: i,
+                    totalInGroup: total,
+                    fullCode: fullCode
+                )
+            )
+        }
+        return segments
+    }
+
     /// Renders markdown text to an array of content blocks.
     public static func render(_ text: String, style: MarkdownRenderer.Style = .init()) -> [MarkdownBlock] {
         let charCount = text.count
@@ -215,10 +268,13 @@ struct BlockWalker: MarkupWalker {
         if codeBlock.language?.lowercased() == "mermaid" {
             blocks.append(.mermaid(MermaidData(source: code)))
         } else {
-            blocks.append(.codeBlock(CodeBlockData(
-                code: code,
-                language: codeBlock.language
-            )))
+            // Split over-tall code blocks into segments. For blocks under
+            // the threshold this returns a single-element array with
+            // `segment == nil`, preserving the pre-change shape.
+            let segments = BlockRenderer.segmentCodeBlock(code: code, language: codeBlock.language)
+            for segment in segments {
+                blocks.append(.codeBlock(segment))
+            }
         }
     }
 

@@ -70,9 +70,13 @@ final class DocumentHeightIndex: ObservableObject {
     /// into O(N).
     private var pendingRebuild = false
 
-    /// Inter-block spacing contributed by the reader's `LazyVStack`.
-    /// Added once per block so the index matches the live layout.
-    private var blockSpacing: CGFloat = 16
+    /// Per-pair spacing provider. `spacingProvider(i)` returns the spacing
+    /// inserted above block `i` (i.e. between blocks `i - 1` and `i`).
+    /// Block 0 is expected to return 0. The reader uses this to collapse
+    /// spacing between same-group code segments so the index's totalHeight
+    /// matches the live layout (otherwise the scroll-percent math drifts
+    /// by 16pt per collapsed seam).
+    private var spacingProvider: (Int) -> CGFloat = { _ in 16 }
 
     // MARK: - Configuration
 
@@ -83,10 +87,16 @@ final class DocumentHeightIndex: ObservableObject {
     func configure(
         blockCount: Int,
         blockSpacing: CGFloat,
-        fallback: @escaping (Int) -> CGFloat
+        fallback: @escaping (Int) -> CGFloat,
+        spacingProvider: ((Int) -> CGFloat)? = nil
     ) {
         self.blockCount = blockCount
-        self.blockSpacing = blockSpacing
+        // If the caller supplies an explicit spacing provider, use it;
+        // otherwise use a constant `blockSpacing` so pre-segmentation call
+        // sites keep working unchanged.
+        self.spacingProvider = spacingProvider ?? { index in
+            index > 0 ? blockSpacing : 0
+        }
         self.fallbackProvider = fallback
         self.measured.removeAll()
         rebuildNow()
@@ -175,11 +185,14 @@ final class DocumentHeightIndex: ObservableObject {
         var p = [CGFloat](repeating: 0, count: blockCount + 1)
         for i in 0..<blockCount {
             let raw = measured[i] ?? fallback(i)
-            // Add inter-block spacing between adjacent blocks (reader
-            // LazyVStack uses `spacing: 16`). The last block doesn't get
-            // trailing spacing, so guard on `i + 1 < blockCount`.
-            let withSpacing = raw + (i + 1 < blockCount ? blockSpacing : 0)
-            p[i + 1] = p[i] + withSpacing
+            // Spacing sits *above* each block — `spacingProvider(i)` gives
+            // the gap between blocks `i - 1` and `i`, so block 0 contributes
+            // 0. This mirrors the reader's per-row `.padding(.top, ...)`
+            // scheme exactly, so totalHeight stays aligned with the live
+            // LazyVStack layout even when same-group code segments collapse
+            // their spacing to 0.
+            let spacing = spacingProvider(i)
+            p[i + 1] = p[i] + spacing + raw
         }
         prefix = p
         totalHeight = blockCount > 0 ? p[blockCount] : 0
@@ -223,7 +236,18 @@ extension DocumentHeightIndex {
             case .codeBlock(let data):
                 var lines = 1
                 for char in data.code where char == "\n" { lines += 1 }
-                return CGFloat(lines) * lineHeight + 48  // + padding, +badge header
+                // Account for which padding / header chrome actually
+                // renders on this segment. First and last (and
+                // non-segmented) blocks get both `.padding(.top, 12)` and
+                // `.padding(.bottom, 12)` around the code (24pt), plus
+                // ~24pt for the badge/copy header on the first. Middle
+                // segments render flush (no chrome). Matches
+                // `CodeBlockView.codeTopPadding` / `codeBottomPadding` /
+                // header presence.
+                var chrome: CGFloat = 0
+                if data.isSegmentFirst { chrome += 12 + 24 }  // top padding + header
+                if data.isSegmentLast { chrome += 12 }         // bottom padding
+                return CGFloat(lines) * lineHeight + chrome
             default:
                 return block.estimatedHeight
             }

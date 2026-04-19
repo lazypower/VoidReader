@@ -16,9 +16,13 @@ struct MarkdownReaderView: View {
         // Use provided blocks or render if empty (fallback for previews)
         let renderBlocks = blocks.isEmpty ? BlockRenderer.render(text) : blocks
 
-        LazyVStack(alignment: .leading, spacing: 16) {
-            ForEach(renderBlocks) { block in
-                blockView(for: block)
+        // `spacing: 0` at the LazyVStack level; per-row top padding adds 16pt
+        // between ordinary blocks but 0 between same-group code segments,
+        // so a segmented code block renders with no visible seams.
+        LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(renderBlocks.indices, id: \.self) { index in
+                blockView(for: renderBlocks[index])
+                    .padding(.top, BlockSpacing.topSpacing(at: index, in: renderBlocks))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -112,6 +116,29 @@ private struct ScrollOffsetPreferenceKey: PreferenceKey {
     }
 }
 
+/// Block-to-block vertical spacing rules. Centralizes the "collapse spacing
+/// between same-group segments" decision so every LazyVStack/VStack path in
+/// the reader agrees, and so the scroll-percent math can mirror it via
+/// `DocumentHeightIndex`'s spacing provider.
+enum BlockSpacing {
+    /// Inter-block spacing used by the reader's `LazyVStack` rows.
+    static let interBlock: CGFloat = 16
+
+    /// Top padding for block at `index`. Returns 0 for the first block
+    /// (nothing above it) and for any code segment that continues the
+    /// previous block's segmentation group; returns `interBlock` otherwise.
+    static func topSpacing(at index: Int, in blocks: [MarkdownBlock]) -> CGFloat {
+        guard index > 0 else { return 0 }
+        if case .codeBlock(let curr) = blocks[index],
+           case .codeBlock(let prev) = blocks[index - 1],
+           let a = curr.segment, let b = prev.segment,
+           a.groupID == b.groupID {
+            return 0
+        }
+        return interBlock
+    }
+}
+
 /// Renders markdown with block-level anchors for scroll navigation.
 /// Uses LazyVStack for virtual scrolling performance on large documents.
 struct MarkdownReaderViewWithAnchors: View {
@@ -162,12 +189,16 @@ struct MarkdownReaderViewWithAnchors: View {
     /// Direct rendering for smaller documents (< 1000 blocks)
     @ViewBuilder
     private func directContent(blocks renderBlocks: [MarkdownBlock]) -> some View {
-        LazyVStack(alignment: .leading, spacing: 16) {
+        // Same pattern as `MarkdownReaderView.body`: spacing at the stack
+        // level is 0 so segmented code blocks can collapse their inter-row
+        // gap; `BlockSpacing.topSpacing` adds 16pt everywhere else.
+        LazyVStack(alignment: .leading, spacing: 0) {
             // Scroll tracker at top of content
             scrollTracker
 
             ForEach(renderBlocks.indices, id: \.self) { index in
                 blockContent(at: index, in: renderBlocks)
+                    .padding(.top, BlockSpacing.topSpacing(at: index, in: renderBlocks))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -376,13 +407,17 @@ private struct ChunkView: View {
     private var estimatedHeight: CGFloat {
         var total: CGFloat = 0
         for i in startIndex..<endIndex {
-            total += blocks[i].estimatedHeight + 16 // Include spacing
+            let spacing = BlockSpacing.topSpacing(at: i, in: blocks)
+            total += blocks[i].estimatedHeight + spacing
         }
         return total
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        // `spacing: 0` + per-row top padding: identical scheme to
+        // `directContent` so segmented code blocks stay seamless across
+        // chunk boundaries as well.
+        VStack(alignment: .leading, spacing: 0) {
             ForEach(startIndex..<endIndex, id: \.self) { index in
                 // Add match anchor if this block contains the current match
                 if let matchIdx = cachedMatchInfo.blockToFirstMatch[index], matchIdx == currentMatchIndex {
@@ -399,6 +434,7 @@ private struct ChunkView: View {
                     onTaskToggle: onTaskToggle,
                     onMermaidExpand: onMermaidExpand
                 )
+                .padding(.top, BlockSpacing.topSpacing(at: index, in: blocks))
                 .id("block-\(index)")
             }
         }

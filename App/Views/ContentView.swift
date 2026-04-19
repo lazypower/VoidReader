@@ -630,7 +630,6 @@ struct ContentView: View {
             guard case .codeBlock(let data) = block,
                   data.code.count > CodeBlockView.maxSwiftUITextChars else { continue }
 
-            DebugLog.log(.rendering, "prefetch: enqueueing block \(index) size=\(data.code.count) fontName='\(fontFamily ?? "")' themeName='\(themeName)'")
             CodeBlockMeasurementScheduler.enqueueIfNeeded(
                 code: data.code,
                 language: data.language,
@@ -642,7 +641,6 @@ struct ContentView: View {
                 // Feed the authoritative height into the document-wide
                 // index so totalHeight stops under-reporting as rows
                 // outside the materialized window land their measurements.
-                DebugLog.log(.rendering, "prefetch: measurement landed for block \(index) h=\(result.height)")
                 heightIndex.recordHeight(result.height, at: index)
             }
         }
@@ -659,13 +657,20 @@ struct ContentView: View {
             family: resolvedCodeFontFamily,
             size: CGFloat(readerFontSize * 0.875)
         )
+        // Snapshot blocks so the spacing closure doesn't re-read the
+        // @State array on every invocation (the index queries once per
+        // block during rebuild).
+        let snapshot = renderedBlocks
         documentHeightIndex.configure(
-            blockCount: renderedBlocks.count,
+            blockCount: snapshot.count,
             blockSpacing: 16,
             fallback: DocumentHeightIndex.defaultFallback(
-                for: renderedBlocks,
+                for: snapshot,
                 codeFont: codeFont
-            )
+            ),
+            spacingProvider: { index in
+                BlockSpacing.topSpacing(at: index, in: snapshot)
+            }
         )
     }
 

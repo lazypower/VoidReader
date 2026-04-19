@@ -110,51 +110,52 @@ struct CodeBlockView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Language badge + copy button
-            HStack {
-                if let language = data.language, !language.isEmpty {
-                    Text(language)
-                        .font(.system(size: badgeFontSize, weight: .medium, design: .monospaced))
-                        .foregroundColor(.secondary)
+            // Language badge + copy button — rendered only on the first
+            // segment of a group (or on any non-segmented block). Middle /
+            // last segments stay headerless so the visual block looks like
+            // one continuous fence.
+            if data.isSegmentFirst {
+                HStack {
+                    if let language = data.language, !language.isEmpty {
+                        Text(language)
+                            .font(.system(size: badgeFontSize, weight: .medium, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color(nsColor: .quaternaryLabelColor).opacity(0.5))
+                            .cornerRadius(4)
+                    }
+
+                    Spacer()
+
+                    Button(action: copyCode) {
+                        HStack(spacing: 4) {
+                            Image(systemName: showCopied ? "checkmark" : "doc.on.doc")
+                            if showCopied {
+                                Text("Copied")
+                                    .font(.system(size: badgeFontSize))
+                            }
+                        }
+                        .foregroundColor(showCopied ? .green : .secondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(Color(nsColor: .quaternaryLabelColor).opacity(0.5))
-                        .cornerRadius(4)
-                }
-
-                Spacer()
-
-                Button(action: copyCode) {
-                    HStack(spacing: 4) {
-                        Image(systemName: showCopied ? "checkmark" : "doc.on.doc")
-                        if showCopied {
-                            Text("Copied")
-                                .font(.system(size: badgeFontSize))
-                        }
                     }
-                    .foregroundColor(showCopied ? .green : .secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .buttonStyle(.plain)
+                    .background(Color(nsColor: .quaternaryLabelColor).opacity(0.3))
+                    .cornerRadius(4)
                 }
-                .buttonStyle(.plain)
-                .background(Color(nsColor: .quaternaryLabelColor).opacity(0.3))
-                .cornerRadius(4)
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
 
             // Code content — engine swaps based on size.
             codeContent
         }
         .background(Color(nsColor: .quaternaryLabelColor).opacity(0.3))
-        .cornerRadius(8)
-        .onAppear {
-            DebugLog.log(.rendering, "CodeBlockView.onAppear: size=\(data.code.count) useNSTextView=\(useNSTextView)")
-            onAppearOrInvalidate()
-        }
+        .clipShape(backgroundShape)
+        .onAppear { onAppearOrInvalidate() }
         .onChange(of: colorScheme) { _, _ in onAppearOrInvalidate() }
         .onDisappear {
-            DebugLog.log(.rendering, "CodeBlockView.onDisappear: size=\(data.code.count) had_measurement=\(measurement != nil)")
             // Drop @State-local caches when the block scrolls out. The
             // shared `measurementCache` stays warm — so re-entry re-resolves
             // from the cache with zero extra work (no highlight, no
@@ -185,7 +186,9 @@ struct CodeBlockView: View {
                 highlighted: measurement.attributed
             )
             .frame(height: measurement.height)
-            .padding(12)
+            .padding(.horizontal, 12)
+            .padding(.top, codeTopPadding)
+            .padding(.bottom, codeBottomPadding)
         } else {
             // Placeholder while measurement is in flight. Deterministic,
             // non-zero height so the LazyVStack row has a predictable
@@ -193,7 +196,9 @@ struct CodeBlockView: View {
             // landing we swap once to the authoritative height.
             Color.clear
                 .frame(height: placeholderHeight)
-                .padding(12)
+                .padding(.horizontal, 12)
+                .padding(.top, codeTopPadding)
+                .padding(.bottom, codeBottomPadding)
         }
     }
 
@@ -202,8 +207,38 @@ struct CodeBlockView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             highlightedCode
                 .textSelection(.enabled)
-                .padding(12)
+                .padding(.horizontal, 12)
+                .padding(.top, codeTopPadding)
+                .padding(.bottom, codeBottomPadding)
         }
+    }
+
+    /// Top padding for the code content. Non-segmented blocks and segment-
+    /// first blocks get the 12pt breathing room below the header; middle
+    /// and last segments render flush so adjacent segments look continuous.
+    private var codeTopPadding: CGFloat {
+        data.isSegmentFirst ? 12 : 0
+    }
+
+    /// Bottom padding mirrors the top rule — last segment (or a non-
+    /// segmented block) gets 12pt so the fence closes cleanly; middle
+    /// segments stay flush.
+    private var codeBottomPadding: CGFloat {
+        data.isSegmentLast ? 12 : 0
+    }
+
+    /// Corner-rounded mask that keeps the visual group looking like one
+    /// continuous code fence even though it's many LazyVStack rows: first
+    /// segment rounds top corners only, last rounds bottom only, middles
+    /// stay square, non-segmented blocks round all four.
+    private var backgroundShape: UnevenRoundedRectangle {
+        let radius: CGFloat = 8
+        return UnevenRoundedRectangle(
+            topLeadingRadius: data.isSegmentFirst ? radius : 0,
+            bottomLeadingRadius: data.isSegmentLast ? radius : 0,
+            bottomTrailingRadius: data.isSegmentLast ? radius : 0,
+            topTrailingRadius: data.isSegmentFirst ? radius : 0
+        )
     }
 
     /// Deterministic placeholder height for the large-block gate. Uses the
@@ -257,7 +292,6 @@ struct CodeBlockView: View {
     /// Cache hit → immediate render at authoritative height. Miss → enqueue
     /// off-main work; placeholder renders until result lands on main.
     private func requestMeasurement() {
-        DebugLog.log(.rendering, "CodeBlockView.requestMeasurement: size=\(data.code.count) cache=\(measurementCache != nil)")
         guard let cache = measurementCache else { return }
         let fontName = fontFamily ?? ""
         let key = CodeBlockMeasurementKey(
@@ -271,11 +305,9 @@ struct CodeBlockView: View {
         // has already measured this block.
         Task {
             if let existing = await cache.get(key) {
-                DebugLog.log(.rendering, "CodeBlockView.requestMeasurement: cache HIT, setting measurement h=\(existing.height)")
                 await MainActor.run { measurement = existing }
                 return
             }
-            DebugLog.log(.rendering, "CodeBlockView.requestMeasurement: cache MISS, enqueuing")
 
             CodeBlockMeasurementScheduler.enqueueIfNeeded(
                 code: data.code,
@@ -285,7 +317,6 @@ struct CodeBlockView: View {
                 themeName: themeName,
                 cache: cache
             ) { resultKey, result in
-                DebugLog.log(.rendering, "CodeBlockView.requestMeasurement: onComplete fired h=\(result.height)")
                 // Stale-result guard: if color scheme / font / content
                 // changed between dispatch and completion, the key will no
                 // longer match the view's current state — drop the result.
@@ -295,12 +326,8 @@ struct CodeBlockView: View {
                     fontSize: fontSize,
                     themeName: themeName
                 )
-                guard resultKey == currentKey else {
-                    DebugLog.log(.rendering, "CodeBlockView.requestMeasurement: STALE KEY, dropping")
-                    return
-                }
+                guard resultKey == currentKey else { return }
                 measurement = result
-                DebugLog.log(.rendering, "CodeBlockView.requestMeasurement: measurement set")
             }
         }
     }
@@ -346,8 +373,12 @@ struct CodeBlockView: View {
     }
 
     private func copyCode() {
+        // Segmented blocks copy the *whole* group, not the local slice —
+        // the user sees "one code fence" visually, so the copy button on
+        // the first segment must mirror that intent.
+        let toCopy = data.segment?.fullCode ?? data.code
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(data.code, forType: .string)
+        NSPasteboard.general.setString(toCopy, forType: .string)
 
         withAnimation {
             showCopied = true
