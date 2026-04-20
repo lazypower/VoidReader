@@ -39,11 +39,13 @@ The distinction matters because the next arc probably isn't a hang. It's scroll 
 - `parse_trace.py` is promoted from `/tmp/parse_tp3.py` with minimal rewriting. Python because the xctrace XML export is the input, and Python's `xml.etree.ElementTree` handles it with no dependency footprint. Also because rewriting working code to satisfy language consistency is exactly the "work beyond the task" this codebase pushes back on.
 - Alternative: Swift script via `swift run`. Rejected because adding a Swift package for one-off analysis inflates build time and adds no capability the Python version lacks.
 
-### Decision: Golden-trace baselines are checked in selectively
+### Decision: Trace output ships to Gitea build artifacts, not git
 
-- `build/traces/` is gitignored except `baselines/`. A baseline is copied into `baselines/` only when a human explicitly decides "this is the ground truth for this scenario at this point."
-- Alternative: commit every trace. Rejected because `.trace` bundles are large binary blobs and accumulate fast.
-- Alternative: gitignore everything. Rejected because before/after comparisons across weeks need anchor traces, and re-generating them from unknown-state code is worse than storing a few MB.
+- CI workflow uploads `.trace` bundles + parsed hot-signature reports as build artifacts on every perf run. Retention starts conservative (90d) and extends as historical-query patterns demand.
+- No trace files committed to the repository; `build/traces/` stays fully gitignored. Parser correctness is verified against a small XML-export test fixture under `Tests/VoidReaderCoreTests/Fixtures/traces/` — kilobytes, not megabytes.
+- Alternative: self-hosted S3 (MinIO / Garage / RustFS) with per-object TTLs and a separate "goldens" bucket carrying no lifecycle rule. Deferred — genuinely more capable (differentiated retention, content-addressable URLs, pleasant historical queries) but adds a second store to operate before the lab has produced a single historical-analysis query in anger. Migration later costs one workflow file. Revisit when (a) Gitea artifact limits bite, (b) a `gitea-api | jq | download-loop` makes us curse twice in one session, or (c) cross-repo perf comparison becomes a real need.
+- Alternative: commit "golden" traces under `build/traces/baselines/` with a manifest. Rejected — binary blobs in git, manual promotion discipline, and Gitea artifacts already carry the commit SHA + build metadata for free.
+- Alternative: commit every trace. Rejected for the obvious reason.
 
 ### Decision: Fixture matrix caps at ~12 files
 

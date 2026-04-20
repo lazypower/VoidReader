@@ -29,7 +29,8 @@ The `feat/large-doc-rendering` arc cut 40 consecutive ~1s arrow-key hangs down t
   - App-frame filter (currently substring list)
   - Output modes: `leaf`, `sig3`, `sig5`, `app-anywhere`
 - Add `scripts/perf/run_scenario.sh` that drives xctrace record + parse for a named scenario (`open-large`, `search-navigate`, `scroll-to-bottom`, `edit-toggle`)
-- Store golden-trace baselines under `build/traces/baselines/` for before/after comparison
+- Add a Gitea CI workflow that invokes the scenario runner and uploads `.trace` bundles + parsed reports as build artifacts (retention-based historical access, no trace files in git)
+- Commit a small XML-exported test fixture under `Tests/VoidReaderCoreTests/Fixtures/traces/` so parser correctness is verifiable offline
 
 **Phase 4 — Untapped Instruments**
 
@@ -48,7 +49,8 @@ The `feat/large-doc-rendering` arc cut 40 consecutive ~1s arrow-key hangs down t
 - Optimizing any specific code path. This change institutionalizes the hunt; individual hunts live in their own proposals.
 - Replacing `FrameDropMonitor`, `DebugLog`, `MarkdownPerformanceTests`, or the CI gate work in `add-performance-instrumentation` Phase B
 - Production telemetry, analytics, or user-visible perf UI
-- CI integration of the lab — this is a local developer loop; CI regression gating remains `add-performance-instrumentation`'s responsibility
+- CI-based pass/fail gating — the lab's CI integration is artifact-upload-only for historical access; automated regression gates remain `add-performance-instrumentation` Phase B's responsibility
+- Self-hosted object storage (MinIO / Garage / RustFS) with differentiated retention — considered, deferred until Gitea artifact limits or query pain justify the additional infrastructure
 - iOS / iPadOS
 
 ## Impact
@@ -57,8 +59,10 @@ The `feat/large-doc-rendering` arc cut 40 consecutive ~1s arrow-key hangs down t
 - **Affected code:**
   - `PERFORMANCE.md` (new)
   - `scripts/perf/` (new directory: `parse_trace.py`, `run_scenario.sh`, `sweep.sh`)
-  - `Tests/VoidReaderCoreTests/Fixtures/` (expanded)
-  - `build/traces/baselines/` (new, mostly gitignored with manifest)
+  - `.gitea/workflows/test-perf-lab.yml` (new — may fold into `add-performance-instrumentation` Phase B workflow if shipped first)
+  - `Tests/VoidReaderCoreTests/Fixtures/` (expanded with shape matrix)
+  - `Tests/VoidReaderCoreTests/Fixtures/traces/` (new — small XML exports for parser unit coverage)
+  - `.gitignore` (add `build/traces/` if not already covered)
   - Signpost additions in `App/Views/MarkdownReaderView.swift` (`computeMatchInfo`, `buildHighlighted`, `updateRenderedBlocks`) — coordinated with `add-performance-instrumentation`
   - `DEVELOPMENT.md` runbook section extended
 - **Related changes:**
@@ -70,11 +74,12 @@ The `feat/large-doc-rendering` arc cut 40 consecutive ~1s arrow-key hangs down t
 
 1. `PERFORMANCE.md` exists with at least one numeric threshold for each of the four named user flows, plus a capture method per flow.
 2. Fixture matrix covers all six shapes, with size-sweep variants for at least two shapes.
-3. `scripts/perf/parse_trace.py` reproduces the `parse_tp3.py` analysis on the `manual-3.trace` baseline with no scratch-file edits — all tuning is via CLI flags.
+3. `scripts/perf/parse_trace.py` reproduces the `parse_tp3.py` analysis against the committed XML test fixture with no scratch-file edits — all tuning is via CLI flags.
 4. `scripts/perf/run_scenario.sh search-navigate` produces a trace and a parsed report in under 30 seconds of developer time (one command).
-5. Allocations + Leaks + CA FPS each have a runbook entry that a new contributor can execute without further help.
-6. Invalidation counter harness exposes per-flow body-recompute counts when a `DEBUG` flag is set; the counts are non-zero only when expected.
-7. A threshold sweep for `search-navigate` across 10KB/100KB/1MB produces a markdown table, and that table is committed as the baseline under `openspec/changes/add-performance-lab/findings/`.
+5. Gitea CI workflow uploads `.trace` bundles and parsed reports as build artifacts on every perf-run invocation, retrievable from the build page.
+6. Allocations + Leaks + CA FPS each have a runbook entry that a new contributor can execute without further help.
+7. Invalidation counter harness exposes per-flow body-recompute counts when a `DEBUG` flag is set; the counts are non-zero only when expected.
+8. A threshold sweep for `search-navigate` across 10KB/100KB/1MB produces a markdown table, and that table is committed as the baseline under `openspec/changes/add-performance-lab/findings/`.
 
 ## Risks
 
@@ -82,4 +87,5 @@ The `feat/large-doc-rendering` arc cut 40 consecutive ~1s arrow-key hangs down t
 - **Parser script rot.** Mitigation: `parse_trace.py` is exercised every arc; if it falls out of sync with xctrace XML, it breaks loudly in the next hunt. Treat as a real artifact, review changes in PR.
 - **Fixture matrix grows unbounded.** Mitigation: cap at ~12 fixtures total; retire redundant ones when new shapes are added.
 - **"Work in body" and invalidation counts are useful but imprecise.** Mitigation: counts are a smell-detector, not a contract. Contracts remain numeric (ms, MB, FPS); counts feed code review and local hunts.
-- **Golden traces drift.** Mitigation: baselines are dated and checked in only by explicit intent; `run_scenario.sh` rejects silent baseline overwrites.
+- **Gitea artifact retention cap eventually bites.** Mitigation: start with 90d retention; escalate retention configuration before migrating to S3. Migration cost is one workflow file + optional backfill.
+- **Historical-analysis queries awkward against Gitea API.** Mitigation: accepted trade-off for starting small. Track pain — the second time a query against Gitea API produces a curse, re-open the S3 question with concrete justification.

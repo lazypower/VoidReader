@@ -30,9 +30,19 @@
 - [ ] 3.6 Create `scripts/perf/run_scenario.sh <name>` — wraps `xctrace record` + `parse_trace.py`
 - [ ] 3.7 Named scenarios: `open-large`, `search-navigate`, `scroll-to-bottom`, `edit-toggle`
 - [ ] 3.8 Scenario output: `build/traces/<scenario>-<timestamp>.trace` + parsed report to stdout
-- [ ] 3.9 Create `build/traces/baselines/` with `MANIFEST.md` explaining what each baseline represents
-- [ ] 3.10 Add `.gitignore` entry for `build/traces/*.trace` except `baselines/` (opt-in check-in)
-- [ ] 3.11 Verify `parse_trace.py` reproduces the `manual-3.trace` finding (2 hangs, `findFirstChunkEnd` + `computeMatchInfo`) with no source edits
+- [ ] 3.9 Add `.gitignore` entry for `build/traces/` (entire directory, no opt-in check-ins)
+- [ ] 3.10 Commit a small XML-export test fixture under `Tests/VoidReaderCoreTests/Fixtures/traces/` derived from the `manual-3.trace` search-navigate arc — kilobytes, not megabytes
+- [ ] 3.11 Verify `parse_trace.py` reproduces the expected known-hangs finding against the committed XML fixture with no source edits
+
+## 3b. Gitea CI Workflow
+
+- [ ] 3b.1 Author `.gitea/workflows/test-perf-lab.yml` (or add job to existing `test-perf.yml` from `add-performance-instrumentation` if shipped first)
+- [ ] 3b.2 Workflow invokes `scripts/perf/run_scenario.sh` for each named scenario on PR events
+- [ ] 3b.3 Upload `.trace` bundles as build artifacts (one per scenario)
+- [ ] 3b.4 Upload parsed hot-signature reports as build artifacts alongside traces
+- [ ] 3b.5 Configure repo-level artifact retention to 90 days (document in workflow file)
+- [ ] 3b.6 Verify artifacts are downloadable from a completed build's page
+- [ ] 3b.7 Coordinate scope with `add-performance-instrumentation` Phase B to avoid duplicate workflows
 
 ## 4. Untapped Instruments
 

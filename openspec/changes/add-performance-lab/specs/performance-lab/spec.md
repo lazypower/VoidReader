@@ -70,8 +70,8 @@ The parser MUST apply a configurable idle-frame denylist to separate idle sample
 - **THEN** it selects the thread with the most samples in the window and reports the choice
 
 #### Scenario: Parser reproduces known finding
-- **WHEN** `parse_trace.py` is run against the checked-in `manual-3.trace` baseline
-- **THEN** it identifies the two known hangs (initial `findFirstChunkEnd` and single `computeMatchInfo` rebuild) with no source edits
+- **WHEN** `parse_trace.py` is run against a small canonical XML export committed as a test fixture under `Tests/VoidReaderCoreTests/Fixtures/traces/`
+- **THEN** it identifies the expected known hangs (derived from the `manual-3.trace` search-navigation arc) with no source edits
 
 ### Requirement: Scenario Runner
 
@@ -103,21 +103,25 @@ The harness MUST iterate fixture sizes (10KB, 100KB, 1MB), extract per-signpost 
 - **WHEN** a threshold sweep crosses a cliff (e.g., 100KB passes, 1MB fails a budget)
 - **THEN** the resulting table makes the cliff obvious without further analysis
 
-### Requirement: Golden-Trace Baselines
+### Requirement: CI Artifact Retention
 
-The repository SHALL maintain a `build/traces/baselines/` directory containing curated reference traces with an accompanying manifest.
+The Gitea CI workflow SHALL upload generated trace bundles and parsed hot-signature reports as build artifacts for each perf-run invocation.
 
-Baseline traces MUST be opt-in check-ins; all other traces under `build/traces/` MUST be gitignored.
+Artifact retention MUST be configured at the repo level to support historical analysis across recent build history; the initial retention period is a deliberate conservative choice and may be extended as query patterns demand.
 
-The manifest MUST identify, for each baseline: the scenario, the fixture, the date captured, the commit SHA, and the hardware.
+Raw `.trace` bundles MUST NOT be committed to the repository; `build/traces/` MUST remain fully gitignored.
 
-#### Scenario: Baselines survive rebuilds
-- **WHEN** a contributor runs `make clean`
-- **THEN** `build/traces/baselines/` and its contents are not deleted
+#### Scenario: Traces are retrievable from build history
+- **WHEN** a contributor opens a past Gitea build for a perf-run invocation
+- **THEN** the `.trace` bundles and parsed reports appear as downloadable build artifacts
 
-#### Scenario: Manifest is complete
-- **WHEN** a contributor reads `build/traces/baselines/MANIFEST.md`
-- **THEN** every `.trace` in the directory is documented with scenario, fixture, date, commit, and hardware
+#### Scenario: Parsed reports accompany traces
+- **WHEN** the CI workflow completes a perf scenario
+- **THEN** both the raw `.trace` and the human-readable parsed report are uploaded as artifacts of the same build
+
+#### Scenario: Traces are not committed
+- **WHEN** a contributor runs a local perf scenario producing `build/traces/<scenario>-<timestamp>.trace`
+- **THEN** `git status` does not show the trace file as untracked-but-stageable, because `build/traces/` is gitignored
 
 ### Requirement: Invalidation Counter Harness
 
