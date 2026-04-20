@@ -258,8 +258,7 @@ struct MarkdownReaderViewWithAnchors: View {
         BlockView(
             block: renderBlocks[index],
             documentURL: documentURL,
-            searchText: searchText,
-            matchRanges: cachedMatchInfo.blockMatches[index] ?? [],
+            highlighted: cachedMatchInfo.blockHighlighted[index],
             codeFontSize: codeFontSize,
             codeFontFamily: codeFontFamily,
             onTaskToggle: onTaskToggle,
@@ -308,6 +307,11 @@ struct MarkdownReaderViewWithAnchors: View {
     struct MatchInfo {
         var blockMatches: [Int: [Range<String.Index>]] = [:] // block index -> match ranges in that block's text
         var blockToFirstMatch: [Int: Int] = [:] // block index -> first match index in that block
+        /// Pre-built highlighted copy of each block's AttributedString. Populated
+        /// once per search-key change so `BlockView.body` becomes a pure
+        /// `Text(cached)` read instead of rebuilding highlights on every
+        /// SwiftUI re-evaluation (which happens per arrow-key match navigation).
+        var blockHighlighted: [Int: AttributedString] = [:]
     }
 
     private func computeMatchInfo(blocks: [MarkdownBlock]) -> MatchInfo {
@@ -328,13 +332,56 @@ struct MarkdownReaderViewWithAnchors: View {
             )
 
             if !matches.isEmpty {
-                info.blockMatches[blockIdx] = matches.map { $0.range }
+                let ranges = matches.map { $0.range }
+                info.blockMatches[blockIdx] = ranges
                 info.blockToFirstMatch[blockIdx] = globalMatchIndex
+                info.blockHighlighted[blockIdx] = Self.buildHighlighted(
+                    original: attrString,
+                    originalText: blockText,
+                    matchRanges: ranges
+                )
                 globalMatchIndex += matches.count
             }
         }
 
         return info
+    }
+
+    /// Builds a highlighted `AttributedString` in a single forward pass.
+    ///
+    /// The old approach did `distance(from: startIndex, to: range.lowerBound)`
+    /// per match — O(N) per match, O(M·N) per block — and ran inside
+    /// `BlockView.body` on every re-render. This version walks both the
+    /// source `String` and the mutable `AttributedString` cursor forward in
+    /// lockstep, so each character is visited at most twice total regardless
+    /// of match count. Called once per search-key change; the result is
+    /// cached in `MatchInfo.blockHighlighted`.
+    private static func buildHighlighted(
+        original: AttributedString,
+        originalText: String,
+        matchRanges: [Range<String.Index>]
+    ) -> AttributedString {
+        var result = original
+        var attrCursor = result.startIndex
+        var textCursor = originalText.startIndex
+
+        for range in matchRanges {
+            // Advance to match start (cursor-relative, not from startIndex).
+            let preSpan = originalText.distance(from: textCursor, to: range.lowerBound)
+            let matchStart = result.index(attrCursor, offsetByCharacters: preSpan)
+
+            // Advance to match end.
+            let matchSpan = originalText.distance(from: range.lowerBound, to: range.upperBound)
+            let matchEnd = result.index(matchStart, offsetByCharacters: matchSpan)
+
+            result[matchStart..<matchEnd].backgroundColor = .yellow
+            result[matchStart..<matchEnd].foregroundColor = .black
+
+            attrCursor = matchEnd
+            textCursor = range.upperBound
+        }
+
+        return result
     }
 
     /// Finds which block contains the given heading text.
@@ -427,8 +474,7 @@ private struct ChunkView: View {
                 BlockView(
                     block: blocks[index],
                     documentURL: documentURL,
-                    searchText: searchText,
-                    matchRanges: cachedMatchInfo.blockMatches[index] ?? [],
+                    highlighted: cachedMatchInfo.blockHighlighted[index],
                     codeFontSize: codeFontSize,
                     codeFontFamily: codeFontFamily,
                     onTaskToggle: onTaskToggle,
@@ -446,8 +492,11 @@ private struct ChunkView: View {
 private struct BlockView: View {
     let block: MarkdownBlock
     var documentURL: URL? = nil
-    var searchText: String = ""
-    var matchRanges: [Range<String.Index>] = []
+    /// Pre-highlighted copy of the block's text, when there are matches to
+    /// highlight. Built once per search-key change in `computeMatchInfo`, so
+    /// this closure just picks between the cached highlight and the plain
+    /// text — no per-render string/index walking.
+    var highlighted: AttributedString? = nil
     var codeFontSize: CGFloat = 13
     var codeFontFamily: String? = nil
     var onTaskToggle: ((Int, Bool) -> Void)?
@@ -456,13 +505,8 @@ private struct BlockView: View {
     var body: some View {
         switch block {
         case .text(let attributedString):
-            if !searchText.isEmpty && !matchRanges.isEmpty {
-                Text(highlightedString(attributedString))
-                    .textSelection(.enabled)
-            } else {
-                Text(attributedString)
-                    .textSelection(.enabled)
-            }
+            Text(highlighted ?? attributedString)
+                .textSelection(.enabled)
 
         case .table(let tableData):
             TableBlockView(data: tableData)
@@ -482,26 +526,6 @@ private struct BlockView: View {
         case .mathBlock(let mathData):
             MathBlockView(latex: mathData.latex)
         }
-    }
-
-    private func highlightedString(_ original: AttributedString) -> AttributedString {
-        var result = original
-        let originalText = String(original.characters)
-
-        // Apply highlight background to match ranges
-        for range in matchRanges {
-            // Convert String.Index range to AttributedString range
-            let startOffset = originalText.distance(from: originalText.startIndex, to: range.lowerBound)
-            let endOffset = originalText.distance(from: originalText.startIndex, to: range.upperBound)
-
-            let attrStart = result.index(result.startIndex, offsetByCharacters: startOffset)
-            let attrEnd = result.index(result.startIndex, offsetByCharacters: endOffset)
-
-            result[attrStart..<attrEnd].backgroundColor = .yellow
-            result[attrStart..<attrEnd].foregroundColor = .black
-        }
-
-        return result
     }
 }
 
