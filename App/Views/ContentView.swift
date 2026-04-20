@@ -135,6 +135,9 @@ struct ContentView: View {
     }
 
     var body: some View {
+        #if DEBUG
+        let _ = InvalidationCounter.tick("ContentView")
+        #endif
         Group {
             if isDistractionFree {
                 DistractionFreeView(

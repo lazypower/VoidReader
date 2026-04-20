@@ -1,0 +1,106 @@
+name: Performance Lab
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/perf/**'
+      - 'PERFORMANCE.md'
+      - 'Tests/VoidReaderCoreTests/Fixtures/traces/**'
+      - 'Tests/VoidReaderCoreTests/Fixtures/wide-line-pathology*.md'
+      - 'Tests/VoidReaderCoreTests/Fixtures/many-small-blocks*.md'
+      - '.gitea/workflows/test-perf-lab.yml'
+  workflow_dispatch:
+
+# Repository-level artifact retention: 90 days.
+# The lab's primary CI role is historical access to traces + parsed reports,
+# not pass/fail gating (that stays with add-performance-instrumentation Phase B).
+# If Gitea artifact-limit pressure bites, escalate to extended retention before
+# migrating to self-hosted S3 — see add-performance-lab/design.md for the
+# deferred-alternatives discussion.
+
+jobs:
+  parser-unit:
+    name: Parser unit coverage
+    runs-on: apple
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run parse_trace.py unit tests
+        run: |
+          python3 -m unittest scripts.perf.test_parse_trace -v
+
+      - name: Smoke-test parser against committed fixture
+        run: |
+          python3 scripts/perf/parse_trace.py \
+            Tests/VoidReaderCoreTests/Fixtures/traces/search_navigate_fixture.xml \
+            --window hang1=5.5s:6.1s --window hang2=19.7s:20.2s \
+            --mode leaf --top 5
+
+  scenario-capture:
+    name: Scenario capture (${{ matrix.scenario }})
+    runs-on: apple
+    needs: parser-unit
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario:
+          - open-large
+          - search-navigate
+          - scroll-to-bottom
+          - edit-toggle
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require GUI session
+        run: |
+          if ! pgrep -x WindowServer > /dev/null 2>&1; then
+            echo "::error::No GUI session — WindowServer is not running."
+            exit 1
+          fi
+
+      - name: Generate Xcode project
+        run: make project
+
+      - name: Build app (Debug)
+        run: make build
+
+      - name: Run scenario — ${{ matrix.scenario }}
+        id: run_scenario
+        timeout-minutes: 10
+        continue-on-error: true
+        run: |
+          scripts/perf/run_scenario.sh ${{ matrix.scenario }} --duration 30 \
+            2>&1 | tee build/traces/${{ matrix.scenario }}-report.txt
+
+      - name: Upload trace bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trace-${{ matrix.scenario }}
+          path: build/traces/${{ matrix.scenario }}-*.trace
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Upload XML export
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xml-${{ matrix.scenario }}
+          path: build/traces/${{ matrix.scenario }}-*.xml
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Upload parsed report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-${{ matrix.scenario }}
+          path: build/traces/${{ matrix.scenario }}-report.txt
+          retention-days: 90
+          if-no-files-found: warn
+
+      # Lab is artifact-upload-only. Pass/fail gating stays with
+      # add-performance-instrumentation Phase B once noise floors are known.
+      - name: Lab status (always passes)
+        if: always()
+        run: echo "Lab runs are record-only; see artifacts for analysis."

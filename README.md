@@ -107,6 +107,10 @@ open -a VoidReader document.md
 
 ## Development
 
+See [`DEVELOPMENT.md`](DEVELOPMENT.md) for the full development guide — tooling, workflow, architecture notes, and the Profiling / Performance Lab section.
+
+Performance contracts and thresholds live in [`PERFORMANCE.md`](PERFORMANCE.md).
+
 VoidReader uses [XcodeGen](https://github.com/yonaskolb/XcodeGen) for project management. The `project.yml` is the source of truth.
 
 ```bash

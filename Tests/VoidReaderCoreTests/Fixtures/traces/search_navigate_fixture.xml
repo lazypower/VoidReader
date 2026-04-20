@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<!-- See README.md for fixture description. -->
+<trace-query-result>
+<node xpath="//trace-toc[1]/run[1]/data[1]/table[1]">
+<schema name="time-profile">
+  <col><mnemonic>time</mnemonic><name>Sample Time</name><engineering-type>sample-time</engineering-type></col>
+  <col><mnemonic>thread</mnemonic><name>Thread</name><engineering-type>thread</engineering-type></col>
+  <col><mnemonic>stack</mnemonic><name>Backtrace</name><engineering-type>backtrace</engineering-type></col>
+</schema>
+
+<!-- hang1 window 5.5s to 6.1s, main thread, 10 samples -->
+<!-- First row defines thread id=2, tid=9825346 -->
+<row><sample-time id="1">5600000000</sample-time><thread id="2"><tid id="3">9825346</tid></thread><backtrace id="10"><frame id="11" name="AG::Graph::propagate_dirty(AG::AttributeID)"/><frame id="12" name="GraphHost.flushTransactions()"/><frame id="13" name="ContentView.body.getter"/></backtrace></row>
+<row><sample-time>5650000000</sample-time><thread ref="2"/><backtrace id="20"><frame ref="11"/><frame ref="12"/><frame ref="13"/></backtrace></row>
+<row><sample-time>5700000000</sample-time><thread ref="2"/><backtrace id="21"><frame ref="11"/><frame ref="12"/><frame ref="13"/></backtrace></row>
+<row><sample-time>5750000000</sample-time><thread ref="2"/><backtrace id="22"><frame ref="11"/><frame ref="12"/><frame ref="13"/></backtrace></row>
+<row><sample-time>5800000000</sample-time><thread ref="2"/><backtrace id="23"><frame id="30" name="String.distance(from:to:)"/><frame id="31" name="MarkdownChunker.findFirstChunkEnd(in:targetSize:)"/><frame id="32" name="ContentView.updateRenderedBlocks(from:)"/><frame ref="13"/></backtrace></row>
+<row><sample-time>5850000000</sample-time><thread ref="2"/><backtrace id="24"><frame ref="30"/><frame ref="31"/><frame ref="32"/><frame ref="13"/></backtrace></row>
+<!-- Idle sample inside hang1: should be counted as idle, not work -->
+<row><sample-time>5900000000</sample-time><thread ref="2"/><backtrace id="25"><frame id="40" name="mach_msg2_trap"/><frame id="41" name="CFRunLoopRunSpecific"/></backtrace></row>
+<row><sample-time>5950000000</sample-time><thread ref="2"/><backtrace id="26"><frame ref="11"/><frame ref="12"/><frame ref="13"/></backtrace></row>
+<row><sample-time>6000000000</sample-time><thread ref="2"/><backtrace id="27"><frame ref="11"/><frame ref="12"/><frame ref="13"/></backtrace></row>
+<row><sample-time>6050000000</sample-time><thread ref="2"/><backtrace id="28"><frame ref="30"/><frame ref="31"/><frame ref="32"/><frame ref="13"/></backtrace></row>
+
+<!-- Out-of-window samples: must NOT count toward either hang window -->
+<row><sample-time>10000000000</sample-time><thread ref="2"/><backtrace id="50"><frame ref="11"/><frame ref="12"/><frame ref="13"/></backtrace></row>
+<row><sample-time>15000000000</sample-time><thread ref="2"/><backtrace id="51"><frame ref="11"/><frame ref="12"/><frame ref="13"/></backtrace></row>
+
+<!-- Background thread samples: defines tid=9825400. Should not be attributed to main. -->
+<row><sample-time>5750000000</sample-time><thread id="60"><tid id="61">9825400</tid></thread><backtrace id="62"><frame id="70" name="background_work_loop"/></backtrace></row>
+<row><sample-time>5800000000</sample-time><thread ref="60"/><backtrace id="63"><frame ref="70"/></backtrace></row>
+<row><sample-time>19800000000</sample-time><thread ref="60"/><backtrace id="64"><frame ref="70"/></backtrace></row>
+
+<!-- hang2 window 19.7s to 20.2s, main thread, 8 samples dominated by computeMatchInfo -->
+<row><sample-time>19800000000</sample-time><thread ref="2"/><backtrace id="80"><frame id="81" name="MarkdownReaderViewWithAnchors.computeMatchInfo(blocks:)"/><frame id="82" name="MarkdownReaderViewWithAnchors.updateMatchInfoIfNeeded(blocks:)"/><frame ref="13"/></backtrace></row>
+<row><sample-time>19850000000</sample-time><thread ref="2"/><backtrace id="83"><frame ref="81"/><frame ref="82"/><frame ref="13"/></backtrace></row>
+<row><sample-time>19900000000</sample-time><thread ref="2"/><backtrace id="84"><frame ref="81"/><frame ref="82"/><frame ref="13"/></backtrace></row>
+<row><sample-time>19950000000</sample-time><thread ref="2"/><backtrace id="85"><frame ref="81"/><frame ref="82"/><frame ref="13"/></backtrace></row>
+<row><sample-time>20000000000</sample-time><thread ref="2"/><backtrace id="86"><frame ref="11"/><frame ref="12"/><frame ref="13"/></backtrace></row>
+<row><sample-time>20050000000</sample-time><thread ref="2"/><backtrace id="87"><frame ref="81"/><frame ref="82"/><frame ref="13"/></backtrace></row>
+<row><sample-time>20100000000</sample-time><thread ref="2"/><backtrace id="88"><frame ref="81"/><frame ref="82"/><frame ref="13"/></backtrace></row>
+<row><sample-time>20150000000</sample-time><thread ref="2"/><backtrace id="89"><frame ref="81"/><frame ref="82"/><frame ref="13"/></backtrace></row>
+</node>
+</trace-query-result>
