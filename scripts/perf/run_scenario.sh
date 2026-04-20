@@ -59,17 +59,20 @@ DEFAULT_FIXTURE=""
 PARSE_MODE="leaf"
 PARSE_WINDOW="0s:${DURATION}s"
 
+# Fixture mapping per openspec/changes/add-performance-lab/findings/
+# scenario-review-2026-04-19.md. Canonical lab fixtures use the -100KB
+# size-sweep variants where the cliff hunts have surfaced signal.
 case "$SCENARIO" in
     open-large)
-        DEFAULT_FIXTURE="$REPO_ROOT/Tests/VoidReaderCoreTests/Fixtures/torture_100k_code.md"
+        DEFAULT_FIXTURE="$REPO_ROOT/Tests/VoidReaderCoreTests/Fixtures/wide-line-pathology-100KB.md"
         PARSE_MODE="app-anywhere"
         ;;
     search-navigate)
-        DEFAULT_FIXTURE="$REPO_ROOT/Tests/VoidReaderCoreTests/Fixtures/torture_50k_table.md"
+        DEFAULT_FIXTURE="$REPO_ROOT/Tests/VoidReaderCoreTests/Fixtures/wide-line-pathology-100KB.md"
         PARSE_MODE="sig5"
         ;;
     scroll-to-bottom)
-        DEFAULT_FIXTURE="$REPO_ROOT/Tests/VoidReaderCoreTests/Fixtures/many_small_blocks.md"
+        DEFAULT_FIXTURE="$REPO_ROOT/Tests/VoidReaderCoreTests/Fixtures/many-small-blocks-100KB.md"
         PARSE_MODE="leaf"
         ;;
     edit-toggle)

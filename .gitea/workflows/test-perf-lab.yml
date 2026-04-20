@@ -77,12 +77,13 @@ jobs:
         timeout-minutes: 10
         continue-on-error: true
         run: |
+          mkdir -p build/traces
           scripts/perf/run_scenario.sh ${{ matrix.scenario }} --duration 30 \
             2>&1 | tee build/traces/${{ matrix.scenario }}-report.txt
 
       - name: Upload trace bundle
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: trace-${{ matrix.scenario }}
           path: build/traces/${{ matrix.scenario }}-*.trace
@@ -91,7 +92,7 @@ jobs:
 
       - name: Upload XML export
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: xml-${{ matrix.scenario }}
           path: build/traces/${{ matrix.scenario }}-*.xml
@@ -100,7 +101,7 @@ jobs:
 
       - name: Upload parsed report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: report-${{ matrix.scenario }}
           path: build/traces/${{ matrix.scenario }}-report.txt
