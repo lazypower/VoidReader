@@ -8,8 +8,12 @@ The document MUST define, for each user flow:
 - A named fixture from the fixture matrix
 - A capture method (which signpost, which scenario script)
 - A primary metric (wall-clock ms, MB, or FPS)
-- A pass/fail threshold
-- A dated "actual" measurement
+- A pass/fail threshold (absolute)
+- A dated "actual" measurement, annotated with hardware when it differs from the canonical target
+
+Thresholds are absolute numbers relative to a canonical hardware target footnoted at the file top.
+
+When a change violates a contract, the arc MUST either restore compliance or amend the contract with explicit justification; silent drift is prohibited.
 
 #### Scenario: Contract covers doc-open flow
 - **WHEN** a contributor reads `PERFORMANCE.md`
@@ -22,6 +26,14 @@ The document MUST define, for each user flow:
 #### Scenario: Contract references live signposts
 - **WHEN** a metric in `PERFORMANCE.md` is tied to a specific signpost
 - **THEN** that signpost exists in the codebase OR a task exists against `add-performance-instrumentation` to add it
+
+#### Scenario: Measurements carry hardware annotations
+- **WHEN** an "actual" measurement is recorded on hardware different from the canonical target
+- **THEN** the entry includes a machine/OS annotation so future readers can interpret variance
+
+#### Scenario: Contract violation forces explicit choice
+- **WHEN** an arc's measurement exceeds a threshold
+- **THEN** the PR either fixes the regression or amends the contract with a written justification in the arc's findings doc; a reviewer rejects silent acceptance
 
 ### Requirement: Fixture Matrix
 
@@ -99,6 +111,10 @@ The harness MUST iterate fixture sizes (10KB, 100KB, 1MB), extract per-signpost 
 - **WHEN** a contributor runs `scripts/perf/sweep.sh search-navigate wide-line-pathology`
 - **THEN** a markdown table is printed to stdout and saved to `openspec/changes/<arc>/findings/sweep-<scenario>-<date>.md` when invoked with a `--save` flag
 
+#### Scenario: Sweep output includes deltas vs. baseline
+- **WHEN** a sweep runs against a prior baseline from the same scenario
+- **THEN** the markdown table includes a `Δ vs. baseline` column alongside absolute p50/p95, so reviewers see regression or improvement independent of hardware variance
+
 #### Scenario: Cliff behavior is visible
 - **WHEN** a threshold sweep crosses a cliff (e.g., 100KB passes, 1MB fails a budget)
 - **THEN** the resulting table makes the cliff obvious without further analysis
@@ -156,3 +172,38 @@ Each runbook MUST specify: the Instruments template, the fixture, the user actio
 #### Scenario: CA FPS runbook targets scroll jank
 - **WHEN** a contributor opens the Core Animation FPS runbook
 - **THEN** it uses the `many-small-blocks` fixture and describes what a scroll hitch looks like on the FPS track
+
+### Requirement: Findings Document Structure
+
+Every findings document under `openspec/changes/<arc>/findings/` SHALL name the dominant hot signature, state its interpretation, and declare the chosen action. Raw tables without interpretation are insufficient.
+
+Required structure (at minimum):
+- **Dominant hot signature** — the top app-anywhere or sig5 frame and its percentage
+- **Interpretation** — what the signature indicates about where work is happening
+- **Chosen action** — one of: fix applied (link commit), deferred (reason + owner), accepted-with-justification (contract amendment reference)
+
+#### Scenario: Findings without interpretation are rejected
+- **WHEN** a PR adds a findings doc containing only a sweep table
+- **THEN** the reviewer rejects it for missing hot signature / interpretation / action
+
+#### Scenario: Findings template exists
+- **WHEN** a contributor starts a new findings doc
+- **THEN** a template at `scripts/perf/findings_template.md` provides the required structure with inline guidance
+
+### Requirement: Scenario Relevance Review
+
+The project SHALL audit lab scenarios against real-world inputs on a recurring cadence to prevent drift between synthetic fixtures and actual user workloads.
+
+Review cadence: every three arcs, or once per calendar quarter, whichever comes first.
+
+Review inputs: user-reported perf issues, dogfooded document captures, real-world paste-from-web pathologies, GitHub issue threads tagged performance.
+
+Review output: a dated note under `openspec/changes/add-performance-lab/findings/scenario-review-<date>.md` listing fixtures added, scenarios added, fixtures retired, and unchanged-but-still-relevant decisions.
+
+#### Scenario: Missed review blocks the next merge
+- **WHEN** the last scenario review date is older than one quarter AND three arcs have shipped since
+- **THEN** the next arc's PR is blocked pending a scenario review
+
+#### Scenario: Review note is committable
+- **WHEN** a scheduled review completes
+- **THEN** a `scenario-review-<date>.md` note is committed with adds / removes / kept decisions and the inputs reviewed

@@ -57,6 +57,34 @@ The distinction matters because the next arc probably isn't a hang. It's scroll 
 - Counters live behind `#if DEBUG` so they're inert in release. Reported via `DebugLog`, not OSSignpost, because the point is "show me this number during development," not "feed Instruments."
 - Alternative: always-on via OSSignpost events. Rejected because counter increments in `body` are exactly the kind of work we want zero-cost in shipping builds.
 
+### Decision: Orchestration and interpretation live in different languages
+
+- `run_scenario.sh` owns orchestration: xctrace invocation, fixture selection, output paths, invoking the parser, CI upload handoff. No interpretation logic ever.
+- `parse_trace.py` owns all interpretation: idle-frame filtering, hot-signature ranking, window scoping, report formatting. No xctrace invocation.
+- Rule-of-thumb for PR review: if a shell script starts parsing trace content, reject the PR and move the logic into Python. If Python starts invoking xctrace, reject and move it back to shell.
+- Alternative: fold everything into shell. Rejected because shell parsing is where diagnostic tools go to die — awk-and-sed pipelines become unmaintainable the moment xctrace's output format shifts.
+- Alternative: fold everything into Python including xctrace invocation via subprocess. Plausible, but shell wraps xctrace more naturally and the boundary is easier to enforce with two languages than with one file by convention.
+
+### Decision: Contracts absolute, measurements hardware-annotated, findings track deltas
+
+- `PERFORMANCE.md` thresholds are absolute numbers (ms, MB, FPS). One canonical hardware target per threshold ("measured on M-series Apple Silicon, macOS 14+") footnoted at the file top.
+- Each "actual" measurement in `PERFORMANCE.md` MUST include a hardware annotation when the measuring machine differs from the canonical target.
+- Threshold-sweep findings MUST include a `Δ vs. baseline` column alongside absolute p50/p95 — because absolute numbers mislead across machines, but deltas tell the truth about whether *this change* regressed anything.
+- Alternative: per-hardware threshold tables (M1 column, M3 column, etc.). Rejected — multiplies maintenance by N hardware targets for marginal clarity gain at our scale.
+- Alternative: deltas only, no absolutes. Rejected because absolute budgets are the arbitration anchor; deltas are a supplementary truth-telling mechanism.
+
+### Decision: Contract arbitration is explicit, never silent
+
+- When an arc's measurement violates a `PERFORMANCE.md` threshold, reviewers MUST see one of: (a) code change that restores the budget, (b) a contract amendment with a written justification in the arc's findings doc. Silent acceptance is a review blocker.
+- The goal is to make drift visible. Numbers that silently creep upward are the single most common way performance systems lose legitimacy.
+- Amendment justifications become searchable history — useful when a future contributor asks "why is the budget this loose?"
+
+### Decision: Findings docs include interpretation, not just data
+
+- Every findings doc under `openspec/changes/<arc>/findings/` MUST name: (a) the dominant hot signature, (b) the interpretation (what the signature is telling us), (c) the chosen action (fix applied, deferred with reason, or accepted with justification).
+- A raw table is insufficient. The discipline is in the interpretation — tables without interpretation are "lab becomes ceremony" in action.
+- Reviewers reject findings docs that skip any of the three required elements.
+
 ## Risks / Trade-offs
 
 - **Risk: `PERFORMANCE.md` goes stale.** Once contracts are written and nobody updates them, they become lies. Mitigation: each perf arc touches `PERFORMANCE.md` to update the "actual" column; reviewers reject arcs that don't.
@@ -76,6 +104,11 @@ Rollback: if the lab doesn't produce a usable practice-arc finding, delete `scri
 
 ## Open Questions
 
-- Should `PERFORMANCE.md` thresholds be hardware-specific (M1 vs M3) or fixed? Leaning fixed with a "measured on <machine>" footnote; revisit if variance makes the numbers meaningless.
-- Who owns the invalidation counter harness long-term? It's debug-only, but debug code that nobody maintains becomes debug code that nobody trusts.
-- Does the lab ever get promoted to CI? `add-performance-instrumentation` Phase B handles one answer; the lab's threshold sweep might have a different CI shape. Defer until we've run three or four arcs through the lab.
+- Does the lab's threshold sweep ever get promoted to pass/fail CI gating? `add-performance-instrumentation` Phase B handles one answer for scenario regressions; the sweep harness might have a different CI shape (e.g., "did any cliff move?"). Defer until we've run three or four arcs through the lab and know what a useful sweep-based gate looks like.
+- What's the right cadence for scenario-relevance review — quarterly calendar-based, or every-three-arcs workload-based? Proposal chose "whichever comes first" but we'll learn which trigger fires first in practice.
+- Does `parse_trace.py` need a `--json` output mode for machine consumption? Deferred until a real consumer exists (CI dashboards, historical-analysis tooling). The moment we find ourselves grepping our own CLI output, that's the signal to add JSON.
+
+## Questions Closed by Review
+
+- ~~Hardware-specific vs fixed thresholds?~~ → Absolute thresholds, hardware-annotated measurements, delta-tracked findings. See Decisions.
+- ~~Who owns the invalidation counter harness?~~ → Whoever breaks it, fixes it. PRs modifying instrumented views verify counters pre-merge. See Decisions.

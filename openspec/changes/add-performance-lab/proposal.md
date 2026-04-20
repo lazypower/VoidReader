@@ -13,6 +13,8 @@ The `feat/large-doc-rendering` arc cut 40 consecutive ~1s arrow-key hangs down t
 - Author `PERFORMANCE.md` at repo root with numeric thresholds for each named user flow (doc open → first paint, scroll, search → navigate, toggle edit mode)
 - Thresholds are budgets, not aspirations; each has a fixture, a capture method, and a pass/fail criterion
 - Contracts SHALL reference signposts from `add-performance-instrumentation` where those exist; missing signposts become task items on that change
+- **Arbitration rule** — when a change violates a contract, the arc MUST either (a) fix the regression or (b) amend the contract with explicit justification. Silently accepting drift is prohibited. Every "actual" update carries an arc reference (commit SHA or PR number) so drift has a paper trail.
+- Measurements are **hardware-annotated**; thresholds are absolute. Findings track deltas vs. prior baseline, not just absolute numbers — because absolute numbers lie across machines and deltas tell the truth.
 
 **Phase 2 — Fixture Matrix**
 
@@ -37,6 +39,7 @@ The `feat/large-doc-rendering` arc cut 40 consecutive ~1s arrow-key hangs down t
 - Runbook additions covering Allocations (memory audit — new caches from 0928a10 have not been sized), Leaks (actor retain cycles in `ImageLoader`/`MermaidImageRenderer`), Core Animation FPS (scroll diagnosis)
 - Signpost additions around high-churn boundaries identified during this arc: `computeMatchInfo`, `buildHighlighted`, `updateRenderedBlocks`, `highlightedString` — feed directly into `add-performance-instrumentation` Phase A
 - Invalidation instrumentation: a lightweight counter harness that surfaces SwiftUI `body` recomputes per user action, so "work in body" regressions get caught by measurement, not review
+- **Ownership rule for the invalidation harness** — whoever breaks it, fixes it. A PR that modifies `BlockView`, `ContentView`, or `MarkdownReaderView` body or their state shape MUST verify the counters still report sensible numbers post-change. Reviewers enforce; no separate maintainer assigned.
 
 **Phase 5 — Threshold Sweep Harness**
 
@@ -89,3 +92,5 @@ The `feat/large-doc-rendering` arc cut 40 consecutive ~1s arrow-key hangs down t
 - **"Work in body" and invalidation counts are useful but imprecise.** Mitigation: counts are a smell-detector, not a contract. Contracts remain numeric (ms, MB, FPS); counts feed code review and local hunts.
 - **Gitea artifact retention cap eventually bites.** Mitigation: start with 90d retention; escalate retention configuration before migrating to S3. Migration cost is one workflow file + optional backfill.
 - **Historical-analysis queries awkward against Gitea API.** Mitigation: accepted trade-off for starting small. Track pain — the second time a query against Gitea API produces a curse, re-open the S3 question with concrete justification.
+- **Scenario drift — lab becomes accurate but irrelevant.** The matrix optimizes synthetic fixtures that slowly diverge from what users actually open. Mitigation: every three arcs, or once per quarter (whichever comes first), audit lab scenarios against recent user-reported perf issues, dogfooded docs, and real paste-from-web captures. Update fixtures, add scenarios, retire obsolete ones. This is a scheduled review, not an aspirational one — missed reviews block the next arc's merge.
+- **Lab becomes ceremony.** The long-term failure mode: people run the scripts, paste the tables, never read the signatures. Mitigation: every findings doc MUST name the dominant hot signature, state the interpretation, and declare the chosen action (fix / defer / accept-with-justification). Raw tables without interpretation are insufficient and get rejected in review.

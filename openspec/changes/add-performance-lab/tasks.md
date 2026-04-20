@@ -6,7 +6,9 @@
 - [ ] 1.2 For each flow, specify: fixture, capture method, primary metric, threshold, how to measure
 - [ ] 1.3 Capture current baselines (from `manual-3.trace` and fresh runs) as the initial "actual" column
 - [ ] 1.4 Cross-link each contract line to the signpost(s) that capture it; file missing-signpost tasks against `add-performance-instrumentation`
-- [ ] 1.5 Review with Chuck before landing (contracts are commitments; he owns thresholds)
+- [ ] 1.5 Document the canonical hardware target at file top; add hardware-annotation convention for "actual" measurements
+- [ ] 1.6 Document the arbitration rule explicitly: contract violations require either a fix or a justified amendment, never silent drift
+- [ ] 1.7 Review with Chuck before landing (contracts are commitments; he owns thresholds)
 
 ## 2. Fixture Matrix
 
@@ -33,6 +35,8 @@
 - [ ] 3.9 Add `.gitignore` entry for `build/traces/` (entire directory, no opt-in check-ins)
 - [ ] 3.10 Commit a small XML-export test fixture under `Tests/VoidReaderCoreTests/Fixtures/traces/` derived from the `manual-3.trace` search-navigate arc — kilobytes, not megabytes
 - [ ] 3.11 Verify `parse_trace.py` reproduces the expected known-hangs finding against the committed XML fixture with no source edits
+- [ ] 3.12 Document the orchestration/interpretation contract in `scripts/perf/README.md`: `run_scenario.sh` owns orchestration, `parse_trace.py` owns interpretation, no crossover
+- [ ] 3.13 Deferred (future note, not implementation): `parse_trace.py --json` output mode — add when a real consumer exists, not before
 
 ## 3b. Gitea CI Workflow
 
@@ -53,6 +57,7 @@
 - [ ] 4.5 Design invalidation counter harness: `DEBUG`-gated counter per SwiftUI view that increments in `body`
 - [ ] 4.6 Implement invalidation counter for `BlockView`, `ContentView`, `MarkdownReaderView`
 - [ ] 4.7 Add one-shot report: "search→navigate tick increments BlockView body N times" — sanity check
+- [ ] 4.8 Document the "whoever breaks it fixes it" ownership rule in `DEVELOPMENT.md` next to the harness itself; reviewers enforce on PRs touching instrumented views
 
 ## 5. Threshold Sweep Harness
 
@@ -61,7 +66,20 @@
 - [ ] 5.3 Extract p50/p95 per named signpost from each trace
 - [ ] 5.4 Emit markdown table: columns = sizes, rows = signposts, cells = p50 / p95
 - [ ] 5.5 Run initial sweep for `search-navigate` on wide-line-pathology
-- [ ] 5.6 Commit result to `openspec/changes/add-performance-lab/findings/sweep-search-navigate-<date>.md`
+- [ ] 5.6 Sweep output includes a `Δ vs. baseline` column alongside absolute p50/p95 for cross-machine truth-telling
+- [ ] 5.7 Commit result to `openspec/changes/add-performance-lab/findings/sweep-search-navigate-<date>.md`
+
+## 5b. Findings Template & Discipline
+
+- [ ] 5b.1 Author `scripts/perf/findings_template.md` with three required sections: dominant hot signature, interpretation, chosen action
+- [ ] 5b.2 Document the template in `DEVELOPMENT.md` "how to run a perf arc" narrative
+- [ ] 5b.3 Backfill an example findings doc from the recent search-navigation arc using the template, as a reference implementation
+
+## 5c. Scenario Relevance Review
+
+- [ ] 5c.1 Add a scheduled-review section to `DEVELOPMENT.md`: cadence (every 3 arcs OR quarterly, whichever first), inputs to audit, outputs to produce
+- [ ] 5c.2 Author initial `scenario-review-<date>.md` at the lab's landing (sets the clock; documents starting scenarios and why they exist)
+- [ ] 5c.3 Reviewers enforce: PR bodies for new arcs must reference the most recent scenario review; stale reviews block merges
 
 ## 6. Documentation
 
