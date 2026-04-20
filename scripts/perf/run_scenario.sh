@@ -83,18 +83,19 @@ case "$SCENARIO" in
         ;;
 esac
 
-FIXTURE="${FIXTURE:-$DEFAULT_FIXTURE}"
-if [[ ! -f "$FIXTURE" ]]; then
-    echo "error: fixture not found: $FIXTURE" >&2
-    exit 1
-fi
-
-# Output paths
+# Output paths — mkdir early so callers that pipe our output (e.g. CI `tee`)
+# have a landing directory even if we exit before recording.
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 OUTPUT_DIR="$REPO_ROOT/build/traces"
 mkdir -p "$OUTPUT_DIR"
 TRACE_PATH="$OUTPUT_DIR/${SCENARIO}-${TIMESTAMP}.trace"
 XML_PATH="$OUTPUT_DIR/${SCENARIO}-${TIMESTAMP}.xml"
+
+FIXTURE="${FIXTURE:-$DEFAULT_FIXTURE}"
+if [[ ! -f "$FIXTURE" ]]; then
+    echo "error: fixture not found: $FIXTURE" >&2
+    exit 1
+fi
 
 # Preconditions
 if ! command -v xctrace >/dev/null 2>&1; then
@@ -102,9 +103,17 @@ if ! command -v xctrace >/dev/null 2>&1; then
     exit 1
 fi
 
-APP_BUNDLE="$REPO_ROOT/build/Build/Products/Debug/VoidReader.app"
+# Resolve the .app bundle via xcodebuild rather than assuming a path. `make
+# build` doesn't pass -derivedDataPath, so products land in
+# ~/Library/Developer/Xcode/DerivedData/<project>-<hash>/Build/Products/Debug/
+# which varies per machine and per checkout.
+APP_BUNDLE="$(
+    xcodebuild -scheme VoidReader -configuration Debug -showBuildSettings 2>/dev/null \
+        | awk -F' = ' '/^ *BUILT_PRODUCTS_DIR = /{print $2; exit}'
+)/VoidReader.app"
+
 if [[ ! -d "$APP_BUNDLE" ]]; then
-    echo "error: VoidReader.app not built at $APP_BUNDLE" >&2
+    echo "error: VoidReader.app not found at $APP_BUNDLE" >&2
     echo "       run 'make build' first" >&2
     exit 1
 fi
