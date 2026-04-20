@@ -1,6 +1,14 @@
 name: Performance Lab
 
 on:
+  push:
+    paths:
+      - 'scripts/perf/**'
+      - 'PERFORMANCE.md'
+      - 'Tests/VoidReaderCoreTests/Fixtures/traces/**'
+      - 'Tests/VoidReaderCoreTests/Fixtures/wide-line-pathology*.md'
+      - 'Tests/VoidReaderCoreTests/Fixtures/many-small-blocks*.md'
+      - '.gitea/workflows/test-perf-lab.yml'
   pull_request:
     paths:
       - 'scripts/perf/**'
