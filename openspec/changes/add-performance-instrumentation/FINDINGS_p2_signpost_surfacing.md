@@ -55,7 +55,7 @@ Three confounders were present at the time `a81042e` was tested. Any of them, al
 
 The most recent three traces in `build/traces/` all have:
 ```xml
-<process name="VoidReader" pid="..." path="/Users/chuck/Code/void_reader/build/derived/Build/Products/Release/VoidReader.app"/>
+<process name="VoidReader" pid="..." path="<redacted>/build/derived/Build/Products/Release/VoidReader.app"/>
 ```
 
 All three were **Release builds**, despite `make profile: build` depending on the Debug target. That's because `xcodebuild -showBuildSettings` picked up a previously written-down `build/derived/` SYMROOT (populated by `make dmg` / `make install`) instead of the standard DerivedData path. The `grep -m 1 BUILT_PRODUCTS_DIR` in the Makefile is fragile against this.
@@ -207,14 +207,14 @@ It is worth adding a third guard in Phase B: a test that runs inside a live `xct
 
 ---
 
-## File map (absolute paths)
+## File map
 
-- **Findings report (this file):** `/Users/chuck/Code/void_reader/.claude/worktrees/agent-aca65f3f/FINDINGS_p2_signpost_surfacing.md`
-- **Fixed source:** `/Users/chuck/Code/void_reader/.claude/worktrees/agent-aca65f3f/Sources/VoidReaderCore/Utilities/Signposts.swift`
-- **Upstream FINDINGS with parked P2 note:** `/Users/chuck/Code/void_reader/FINDINGS_large_doc_rendering.md` (§"Parked from feat/perf-instrumentation" → P2)
-- **Makefile (Fix B target):** `/Users/chuck/Code/void_reader/.claude/worktrees/agent-aca65f3f/Makefile` (profile target, not modified)
-- **Probe site (Fix C):** `/Users/chuck/Code/void_reader/.claude/worktrees/agent-aca65f3f/App/Views/ContentView.swift:186`
-- **Existing traces for reference:** `/Users/chuck/Code/void_reader/build/traces/` (three traces, all Release builds, incomplete for diagnosis)
+- **Findings report (this file):** `openspec/changes/add-performance-instrumentation/FINDINGS_p2_signpost_surfacing.md`
+- **Fixed source:** `Sources/VoidReaderCore/Utilities/Signposts.swift`
+- **Upstream FINDINGS with parked P2 note:** `FINDINGS_large_doc_rendering.md` (§"Parked from feat/perf-instrumentation" → P2)
+- **Makefile (Fix B target):** `Makefile` (profile target, not modified)
+- **Probe site (Fix C):** `App/Views/ContentView.swift` (onAppear diagnostic)
+- **Existing traces for reference:** `build/traces/` (three traces, all Release builds, incomplete for diagnosis)
 - **Signpost emission call sites:**
   - `Sources/VoidReaderCore/Renderer/BlockRenderer.swift:14,16`
   - `Sources/VoidReaderCore/Utilities/ImageLoader.swift:31`
