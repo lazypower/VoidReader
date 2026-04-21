@@ -93,6 +93,7 @@ OUTPUT_DIR="$REPO_ROOT/build/traces"
 mkdir -p "$OUTPUT_DIR"
 TRACE_PATH="$OUTPUT_DIR/${SCENARIO}-${TIMESTAMP}.trace"
 XML_PATH="$OUTPUT_DIR/${SCENARIO}-${TIMESTAMP}.xml"
+XCTRACE_LOG_PATH="$OUTPUT_DIR/${SCENARIO}-${TIMESTAMP}.xctrace.log"
 
 FIXTURE="${FIXTURE:-$DEFAULT_FIXTURE}"
 if [[ ! -f "$FIXTURE" ]]; then
@@ -133,27 +134,36 @@ sleep 1
 # Record the trace. Launches the app with the fixture, profiles for DURATION
 # seconds, then stops. The launched process exits when Instruments detaches.
 #
-# xctrace can exit non-zero while still producing a valid .trace bundle — e.g.
-# the Time Profiler samples land correctly but an unrelated data stream (like
-# os_log, which requires TCC access to /var/db/diagnostics) is flagged corrupt.
-# CPU stack samples are what `parse_trace.py` consumes, so we tolerate xctrace's
-# exit code and gate solely on whether the .trace bundle materialized.
+# xctrace's exit code is an unreliable pass/fail signal: `--launch` propagates
+# the child process's exit status, so a clean recording whose app exits with a
+# non-zero code (e.g. SIGTERM handling, app-specific exit) looks like failure.
+# Conversely, a broken recording can still let a healthy child exit cleanly.
+#
+# Trust xctrace's own assessment instead. It prints a "Recording failed with
+# errors" line when something actually went wrong, and "Recording completed"
+# when it didn't. Gate on that string, not on $?.
 set +e
 xctrace record \
     --template "Time Profiler" \
     --output "$TRACE_PATH" \
     --time-limit "${DURATION}s" \
     --target-stdout - \
-    --launch -- "$APP_BUNDLE/Contents/MacOS/VoidReader" "$FIXTURE"
-xctrace_exit=$?
+    --launch -- "$APP_BUNDLE/Contents/MacOS/VoidReader" "$FIXTURE" 2>&1 \
+    | tee "$XCTRACE_LOG_PATH"
+xctrace_exit=${PIPESTATUS[0]}
 set -e
 
+if grep -q "Recording failed with errors" "$XCTRACE_LOG_PATH"; then
+    echo "error: xctrace reported recording failure (exit=$xctrace_exit)" >&2
+    echo "  see: $XCTRACE_LOG_PATH" >&2
+    exit 1
+fi
 if [[ ! -d "$TRACE_PATH" ]]; then
     echo "error: xctrace did not produce $TRACE_PATH (exit=$xctrace_exit)" >&2
     exit 1
 fi
 if (( xctrace_exit != 0 )); then
-    echo "[run_scenario] note: xctrace exited $xctrace_exit but trace bundle was produced — continuing" >&2
+    echo "[run_scenario] note: xctrace exited $xctrace_exit but reported clean recording — child-process exit propagation, continuing" >&2
 fi
 
 # Export XML for the parser

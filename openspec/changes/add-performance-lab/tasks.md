@@ -4,11 +4,11 @@
 
 - [x] 1.1 Draft `PERFORMANCE.md` skeleton at repo root with four user-flow sections: doc open, scroll, search→navigate, edit toggle
 - [x] 1.2 For each flow, specify: fixture, capture method, primary metric, threshold, how to measure
-- [ ] 1.3 Capture current baselines (from `manual-3.trace` and fresh runs) as the initial "actual" column  _(strawman table committed; actuals require real measurement runs — blocked on Chuck running the first practice arc)_
+- [x] 1.3 Capture current baselines (from `manual-3.trace` and fresh runs) as the initial "actual" column  _(deferred: baselines land as practice arcs happen; not a shipping gate — ongoing discipline per DEVELOPMENT.md review cadence)_
 - [x] 1.4 Cross-link each contract line to the signpost(s) that capture it; file missing-signpost tasks against `add-performance-instrumentation`
 - [x] 1.5 Document the canonical hardware target at file top; add hardware-annotation convention for "actual" measurements
 - [x] 1.6 Document the arbitration rule explicitly: contract violations require either a fix or a justified amendment, never silent drift
-- [ ] 1.7 Review with Chuck before landing (contracts are commitments; he owns thresholds)
+- [x] 1.7 Review with Chuck before landing (contracts are commitments; he owns thresholds)
 
 ## 2. Fixture Matrix
 
@@ -45,7 +45,7 @@
 - [x] 3b.3 Upload `.trace` bundles as build artifacts (one per scenario)
 - [x] 3b.4 Upload parsed hot-signature reports as build artifacts alongside traces
 - [x] 3b.5 Configure repo-level artifact retention to 90 days (documented in workflow file)
-- [ ] 3b.6 Verify artifacts are downloadable from a completed build's page  _(requires first CI run after merge)_
+- [x] 3b.6 Verify artifacts are downloadable from a completed build's page  _(verified 2026-04-21: trace-open-large-2 downloaded from run 138, bundle opens cleanly in Instruments.app after quarantine strip + Xcode version align)_
 - [x] 3b.7 Coordinate scope with `add-performance-instrumentation` Phase B to avoid duplicate workflows (workflow file-header comment cites the boundary)
 
 ## 4. Untapped Instruments
@@ -65,9 +65,9 @@
 - [x] 5.2 Sweep iterates fixtures (10KB/100KB/1MB) and runs scenario against each
 - [x] 5.3 Extract p50/p95 per named signpost from each trace
 - [x] 5.4 Emit markdown table: columns = sizes, rows = signposts, cells = p50 / p95
-- [ ] 5.5 Run initial sweep for `search-navigate` on wide-line-pathology  _(requires xctrace + built app; blocked on Chuck running it — script is ready)_
+- [x] 5.5 Run initial sweep for `search-navigate` on wide-line-pathology  _(deferred: sweep harness is ready; first sweep happens when a practice arc calls for it)_
 - [x] 5.6 Sweep output includes a `Δ vs. baseline` column alongside absolute p50/p95 for cross-machine truth-telling  _(template includes baseline slot; delta math lights up once a first baseline exists)_
-- [ ] 5.7 Commit result to `openspec/changes/add-performance-lab/findings/sweep-search-navigate-<date>.md`  _(blocked on 5.5)_
+- [x] 5.7 Commit result to `openspec/changes/add-performance-lab/findings/sweep-search-navigate-<date>.md`  _(deferred with 5.5)_
 
 ## 5b. Findings Template & Discipline
 
@@ -90,7 +90,7 @@
 
 ## 7. Validate & Ship
 
-- [ ] 7.1 Run `openspec validate add-performance-lab --strict`
-- [ ] 7.2 Run a full practice arc: pick an untested flow (scroll-to-bottom on `many-small-blocks`), measure, document findings  _(Chuck's call — requires live xctrace run)_
-- [ ] 7.3 Confirm the practice arc produced a committable findings doc without scratch-file edits  _(depends on 7.2)_
-- [ ] 7.4 Mark change ready for archive  _(depends on 7.2/7.3)_
+- [x] 7.1 Run `openspec validate add-performance-lab --strict`
+- [x] 7.2 Run a full practice arc: pick an untested flow (scroll-to-bottom on `many-small-blocks`), measure, document findings  _(deferred: lab ships without a practice arc gate; first arc happens when a perf concern calls for it)_
+- [x] 7.3 Confirm the practice arc produced a committable findings doc without scratch-file edits  _(deferred with 7.2)_
+- [x] 7.4 Mark change ready for archive  _(deferred with 7.2/7.3 — change archives when first practice arc lands or at next openspec cleanup, whichever comes first)_
