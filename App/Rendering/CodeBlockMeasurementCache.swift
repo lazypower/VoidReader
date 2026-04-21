@@ -127,24 +127,32 @@ enum CodeBlockMeasurement {
         themeName: String,
         highlighter: Highlightr?
     ) -> CodeBlockMeasurementResult {
-        let attributed: NSAttributedString
+        // Above the highlight ceiling, we still measure height (the renderer
+        // needs an authoritative frame) but skip building + caching the
+        // AttributedString: CodeTextView's `highlighted: nil` path will build
+        // a plain string at render time from the raw code, so caching it
+        // here is duplicated memory on exactly the blocks where memory
+        // matters most.
+        let measuredFor: NSAttributedString
+        let shouldCacheAttributed: Bool
 
         if code.count <= maxHighlightChars, let highlightr = highlighter {
             highlightr.setTheme(to: themeName)
             if let highlighted = highlightr.highlight(code, as: language?.lowercased()) {
-                attributed = slim(highlighted, font: font)
+                measuredFor = slim(highlighted, font: font)
             } else {
-                attributed = plain(code, font: font)
+                measuredFor = plain(code, font: font)
             }
+            shouldCacheAttributed = true
         } else {
-            attributed = plain(code, font: font)
+            measuredFor = plain(code, font: font)
+            shouldCacheAttributed = false
         }
 
-        let height = CodeBlockLayoutConfig.measureHeight(of: attributed)
-        let swiftAttr = try? AttributedString(
-            attributed,
-            including: AttributeScopes.AppKitAttributes.self
-        )
+        let height = CodeBlockLayoutConfig.measureHeight(of: measuredFor)
+        let swiftAttr: AttributedString? = shouldCacheAttributed
+            ? (try? AttributedString(measuredFor, including: AttributeScopes.AppKitAttributes.self))
+            : nil
         return CodeBlockMeasurementResult(attributed: swiftAttr, height: height)
     }
 

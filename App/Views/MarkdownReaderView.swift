@@ -20,8 +20,12 @@ struct MarkdownReaderView: View {
         // between ordinary blocks but 0 between same-group code segments,
         // so a segmented code block renders with no visible seams.
         LazyVStack(alignment: .leading, spacing: 0) {
-            ForEach(renderBlocks.indices, id: \.self) { index in
-                blockView(for: renderBlocks[index])
+            // Identity tracks block.id, not index. Index-based identity
+            // caused SwiftUI to reuse CodeBlockView @State (highlighted +
+            // measurement caches) across different blocks when the block
+            // list regenerated on edit/reload/settings change.
+            ForEach(Array(renderBlocks.enumerated()), id: \.element.id) { index, block in
+                blockView(for: block)
                     .padding(.top, BlockSpacing.topSpacing(at: index, in: renderBlocks))
             }
         }
@@ -196,7 +200,8 @@ struct MarkdownReaderViewWithAnchors: View {
             // Scroll tracker at top of content
             scrollTracker
 
-            ForEach(renderBlocks.indices, id: \.self) { index in
+            // Identity tracks block.id, not index — see MarkdownReaderView.body.
+            ForEach(Array(renderBlocks.enumerated()), id: \.element.id) { index, _ in
                 blockContent(at: index, in: renderBlocks)
                     .padding(.top, BlockSpacing.topSpacing(at: index, in: renderBlocks))
             }
@@ -465,7 +470,10 @@ private struct ChunkView: View {
         // `directContent` so segmented code blocks stay seamless across
         // chunk boundaries as well.
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(startIndex..<endIndex, id: \.self) { index in
+            // Identity tracks block.id, not slot index — see MarkdownReaderView.body.
+            // `offset` is slice-local (0-based); global index is `startIndex + offset`.
+            ForEach(Array(blocks[startIndex..<endIndex].enumerated()), id: \.element.id) { offset, _ in
+                let index = startIndex + offset
                 // Add match anchor if this block contains the current match
                 if let matchIdx = cachedMatchInfo.blockToFirstMatch[index], matchIdx == currentMatchIndex {
                     Color.clear.frame(height: 0).id("match-\(currentMatchIndex)")

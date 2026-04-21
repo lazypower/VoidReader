@@ -2,7 +2,7 @@
 
 **Branch:** `feat/perf-instrumentation`
 **Investigation date:** 2026-04-18
-**Worktree:** `/Users/chuck/Code/void_reader/.claude/worktrees/agent-aca65f3f`
+**Worktree:** `$WORKTREE/.claude/worktrees/agent-aca65f3f`
 **Symptom:** `make profile FILE=...` produces a `.trace` file. Apple's built-in signposts render normally in Instruments. VoidReader's custom signposts (subsystems `place.wabash.VoidReader.*`) never appear — not in Points of Interest, not in the `os_signpost` lane, not in `xctrace export`.
 
 ---

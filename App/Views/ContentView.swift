@@ -207,8 +207,10 @@ struct ContentView: View {
             defer { signposter.endInterval("openDocument", state) }
 
             DebugLog.info(.lifecycle, "ContentView.onAppear - \(fileURL?.lastPathComponent ?? "untitled") (\(document.text.count) chars)")
-            // DIAGNOSTIC: confirm whether signposts are enabled at runtime. Remove after debugging.
+            #if DEBUG
+            // DIAGNOSTIC: confirm whether signposts are enabled at runtime.
             DebugLog.info(.lifecycle, "Signposts.lifecycle.isEnabled=\(Signposts.lifecycle.isEnabled) rendering.isEnabled=\(Signposts.rendering.isEnabled)")
+            #endif
             DebugLog.logMemory(.lifecycle, context: "Document open")
             setupDebouncing()
             updateHeadings(from: document.text)
@@ -555,15 +557,17 @@ struct ContentView: View {
         // Cancel any in-progress render
         renderTask?.cancel()
 
-        // Invalidate the measurement cache. Cache keys encode font, size,
-        // and theme — any re-render implies one of these changed, the
-        // document content changed, or both. Stale entries are harmless
-        // at query time (new keys won't collide) but they consume memory
-        // forever if we don't evict. Fire-and-forget clear on the actor.
-        let cache = codeBlockMeasurementCache
-        Task { await cache.clear() }
-        let tableCache = tableMeasurementCache
-        Task { await tableCache.clear() }
+        // Invalidate the measurement cache by swapping in fresh instances
+        // rather than awaiting `clear()`. Reason: a fire-and-forget
+        // `Task { await cache.clear() }` can race with the prefetch writes
+        // kicked off just below (`prefetchCodeBlockMeasurements()`), wiping
+        // entries that were populating for the new document. Swapping
+        // instances sidesteps the race entirely — SwiftUI re-publishes the
+        // new cache through `.environment(\.codeBlockMeasurementCache, …)`,
+        // the old instance GCs once any in-flight writes land on it (those
+        // writes are harmless and never read back).
+        codeBlockMeasurementCache = CodeBlockMeasurementCache()
+        tableMeasurementCache = TableMeasurementCache()
 
         let renderingSignposter = Signposts.signposter(for: .rendering)
 

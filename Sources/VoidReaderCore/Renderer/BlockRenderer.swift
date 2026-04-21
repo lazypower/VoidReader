@@ -17,10 +17,12 @@ public struct BlockRenderer {
     /// slices, joined by a shared `groupID`. Returns a single-element array
     /// for blocks under the threshold (no segment metadata attached).
     static func segmentCodeBlock(code: String, language: String?) -> [CodeBlockData] {
-        // Split on newlines. `components(separatedBy:)` collapses well with
-        // the "no trailing newline" case (last element is empty string if
-        // the code ends in \n). We handle both.
-        let lines = code.components(separatedBy: "\n")
+        // Split on newlines into Substrings. `split(omittingEmptySubsequences:
+        // false)` matches `components(separatedBy:)` semantics (trailing \n
+        // yields a final empty element) without allocating a [String] copy of
+        // every line — material for the pathological-fence case this feature
+        // targets. Substring is a copy-on-write view into `code`.
+        let lines = code.split(separator: "\n", omittingEmptySubsequences: false)
         guard lines.count > segmentationLineThreshold else {
             return [CodeBlockData(code: code, language: language)]
         }
