@@ -13,7 +13,6 @@ Safe to re-run — regenerates fixtures in place.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 FIXTURE_DIR = Path(__file__).resolve().parent.parent.parent / "Tests" / "VoidReaderCoreTests" / "Fixtures"

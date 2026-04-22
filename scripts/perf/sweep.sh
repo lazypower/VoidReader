@@ -2,11 +2,11 @@
 # sweep.sh — size-sweep harness for threshold-cliff hunting.
 #
 # Runs a scenario against 10KB / 100KB / 1MB variants of a named fixture shape
-# and emits a markdown table of per-signpost p50/p95 durations extracted from
-# each trace. Output goes to stdout and (with --save) to a findings doc.
+# and emits a markdown p50/p95 table per signpost, assembled by
+# `parse_signposts.py` from each trace's signpost-intervals XML.
 #
-# Orchestration only. Signpost duration extraction is delegated to xctrace
-# export + parse_trace.py. No stack parsing in shell.
+# Orchestration only. Signpost extraction and table rendering live in Python
+# (parse_signposts.py) — if you're tempted to parse XML in shell, stop.
 #
 # Usage:
 #     scripts/perf/sweep.sh <scenario> <shape> [--save ARC_NAME] [--baseline PATH]
@@ -19,16 +19,18 @@ set -euo pipefail
 
 usage() {
     cat >&2 <<EOF
-usage: $0 <scenario> <shape> [--save ARC_NAME] [--baseline BASELINE_MD]
+usage: $0 <scenario> <shape> [--save ARC_NAME] [--baseline BASELINE_JSON]
 
 Runs <scenario> against <shape> at three sizes (10KB, 100KB, 1MB) and
 emits a markdown p50/p95 table per named signpost.
 
 Options:
     --save ARC_NAME     Write result to openspec/changes/<ARC_NAME>/findings/
-                        sweep-<scenario>-<date>.md (stdout also prints)
-    --baseline PATH     Prior sweep markdown to diff against; adds a
-                        "delta vs. baseline" column.
+                        sweep-<scenario>-<date>.md (stdout also prints).
+                        Also writes a JSON snapshot alongside for future
+                        --baseline comparisons.
+    --baseline PATH     Prior sweep JSON snapshot to diff against; adds a
+                        per-size Δp50 column.
 
 Shapes (match names under Tests/VoidReaderCoreTests/Fixtures/):
     wide-line-pathology, many-small-blocks
@@ -56,9 +58,11 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 FIXTURE_DIR="$REPO_ROOT/Tests/VoidReaderCoreTests/Fixtures"
 
 SIZES=("10KB" "100KB" "1MB")
-TRACES=()
+LABELED_ARGS=()
 
-# Run scenario against each size variant
+# Run scenario against each size variant, collecting signpost-intervals XML
+# per size. run_scenario.sh writes both a time-profile XML and a
+# signposts.xml; we only need the latter for p50/p95.
 for SIZE in "${SIZES[@]}"; do
     FIXTURE="$FIXTURE_DIR/${SHAPE}-${SIZE}.md"
     if [[ ! -f "$FIXTURE" ]]; then
@@ -66,85 +70,48 @@ for SIZE in "${SIZES[@]}"; do
         continue
     fi
     echo "[sweep] $SCENARIO @ $SIZE" >&2
-    # run_scenario.sh emits paths on stderr; we just rely on the output dir
     bash "$SCRIPT_DIR/run_scenario.sh" "$SCENARIO" --fixture "$FIXTURE" >/dev/null
-    # Pick up the most recent trace
-    LATEST_XML="$(ls -1t "$REPO_ROOT/build/traces/${SCENARIO}-"*.xml 2>/dev/null | head -1)"
-    TRACES+=("${SIZE}|${LATEST_XML}")
+    # Pick up the signposts XML that run_scenario.sh just wrote. Pattern
+    # mirrors SIGNPOSTS_PATH in run_scenario.sh.
+    LATEST_SIGNPOSTS="$(ls -1t "$REPO_ROOT/build/traces/${SCENARIO}-"*.signposts.xml 2>/dev/null | head -1)"
+    if [[ -z "$LATEST_SIGNPOSTS" ]]; then
+        echo "warning: no signposts XML produced for $SIZE — skipping" >&2
+        continue
+    fi
+    LABELED_ARGS+=("--labeled" "${SIZE}:${LATEST_SIGNPOSTS}")
 done
 
-# Compose the table via a helper python inlined below — extraction belongs in
-# Python, not shell. Passed as stdin to avoid creating yet another tracked file
-# for a small routine that only this shell script invokes.
-TABLE_SCRIPT="$(cat <<'PYEOF'
-import sys, re, os, statistics
-from collections import defaultdict
-import xml.etree.ElementTree as ET
-
-# Format: SIZE|XML_PATH per line on stdin
-entries = [ln.strip().split("|", 1) for ln in sys.stdin if ln.strip()]
-sizes = [e[0] for e in entries]
-paths = {e[0]: e[1] for e in entries}
-
-# For each trace, extract signpost durations (begin/end pairs). xctrace XML
-# exports include these under the signpost-intervals schema when recorded.
-# This implementation is conservative: if the export doesn't include intervals,
-# we fall back to reporting sample-count totals.
-per_size_per_name = defaultdict(lambda: defaultdict(list))
-
-for size in sizes:
-    path = paths[size]
-    if not os.path.exists(path):
-        continue
-    try:
-        tree = ET.parse(path)
-    except Exception as e:
-        print(f"# parse error {path}: {e}", file=sys.stderr)
-        continue
-    root = tree.getroot()
-    # Try signpost-intervals: rows with <name> + <duration> columns
-    for row in root.iter("row"):
-        name_el = row.find(".//os-signpost-name")
-        dur_el  = row.find(".//duration")
-        if name_el is not None and name_el.text and dur_el is not None and dur_el.text:
-            try:
-                dur_ns = int(dur_el.text)
-                per_size_per_name[size][name_el.text].append(dur_ns)
-            except ValueError:
-                continue
-
-# Gather all signpost names
-all_names = sorted({n for size in sizes for n in per_size_per_name[size]})
-
-def pct(vals, q):
-    if not vals: return None
-    vals = sorted(vals)
-    k = int(round((q/100.0)*(len(vals)-1)))
-    return vals[k]
-
-def fmt_ns(ns):
-    if ns is None: return "—"
-    if ns < 1_000_000: return f"{ns/1_000:.1f}μs"
-    if ns < 1_000_000_000: return f"{ns/1_000_000:.1f}ms"
-    return f"{ns/1_000_000_000:.2f}s"
-
-print(f"| Signpost | " + " | ".join(f"{s} p50 / p95" for s in sizes) + " |")
-print(f"|---|" + "---|"*len(sizes))
-if not all_names:
-    print(f"| _(no signpost intervals in export — check recording template)_ |" + " —|"*len(sizes))
-for name in all_names:
-    cells = []
-    for s in sizes:
-        vals = per_size_per_name[s].get(name, [])
-        cells.append(f"{fmt_ns(pct(vals,50))} / {fmt_ns(pct(vals,95))}")
-    print(f"| `{name}` | " + " | ".join(cells) + " |")
-PYEOF
-)"
-
-# Stream the entries into the inline python
-TABLE="$(printf "%s\n" "${TRACES[@]}" | python3 -c "$TABLE_SCRIPT")"
+# Empty-sweep guard: without at least one trace we have nothing to table and
+# nothing to save. Fail loudly rather than producing a headers-only doc that
+# masquerades as a successful run.
+if [[ ${#LABELED_ARGS[@]} -eq 0 ]]; then
+    echo "error: no traces collected — check fixtures under $FIXTURE_DIR and run_scenario.sh output" >&2
+    exit 1
+fi
 
 DATE_STR="$(date +%Y-%m-%d)"
+
+# Build parse_signposts.py invocation. --emit-snapshot lets future runs of
+# this script diff against today's numbers via --baseline.
+PARSE_ARGS=("$SCRIPT_DIR/parse_signposts.py" "${LABELED_ARGS[@]}")
+if [[ -n "$BASELINE" ]]; then
+    if [[ ! -f "$BASELINE" ]]; then
+        echo "error: --baseline file not found: $BASELINE" >&2
+        exit 1
+    fi
+    PARSE_ARGS+=("--baseline" "$BASELINE")
+fi
+
+SNAPSHOT_PATH=""
+if [[ -n "$SAVE_ARC" ]]; then
+    OUT_DIR="$REPO_ROOT/openspec/changes/$SAVE_ARC/findings"
+    mkdir -p "$OUT_DIR"
+    SNAPSHOT_PATH="$OUT_DIR/sweep-${SCENARIO}-${DATE_STR}.snapshot.json"
+    PARSE_ARGS+=("--emit-snapshot" "$SNAPSHOT_PATH")
+fi
+
+TABLE="$(python3 "${PARSE_ARGS[@]}")"
+
 HEADER="# Sweep: $SCENARIO on $SHAPE ($DATE_STR)
 
 Generated by \`scripts/perf/sweep.sh $SCENARIO $SHAPE\`.
@@ -166,20 +133,19 @@ _(fix applied / deferred / accepted-with-justification)_
 $TABLE
 "
 
-if [[ -n "$BASELINE" && -f "$BASELINE" ]]; then
+if [[ -n "$BASELINE" ]]; then
     HEADER="${HEADER}
-
 Baseline compared: \`$BASELINE\`
-(delta column: see Python extraction when implemented in future sweep)
 "
 fi
 
 echo "$HEADER"
 
 if [[ -n "$SAVE_ARC" ]]; then
-    OUT_DIR="$REPO_ROOT/openspec/changes/$SAVE_ARC/findings"
-    mkdir -p "$OUT_DIR"
     OUT_FILE="$OUT_DIR/sweep-${SCENARIO}-${DATE_STR}.md"
     echo "$HEADER" > "$OUT_FILE"
     echo "[sweep] saved to $OUT_FILE" >&2
+    if [[ -n "$SNAPSHOT_PATH" && -f "$SNAPSHOT_PATH" ]]; then
+        echo "[sweep] snapshot $SNAPSHOT_PATH" >&2
+    fi
 fi

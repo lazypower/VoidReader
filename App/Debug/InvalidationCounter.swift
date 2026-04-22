@@ -1,6 +1,5 @@
 #if DEBUG
 import Foundation
-import os
 import VoidReaderCore
 
 /// DEBUG-gated SwiftUI `body` recompute counter.
@@ -15,6 +14,15 @@ import VoidReaderCore
 /// builds. No OSSignpost emission: the point is "show me this number during
 /// development," not "feed Instruments."
 ///
+/// ## Opt-in, even in DEBUG
+///
+/// `tick()` is a no-op unless `VOID_READER_INVALIDATION_COUNTER=1` is set
+/// in the environment. Reason: the lab also runs in DEBUG, and
+/// `queue.sync { Date() + dict lookup }` on every `body` recompute would
+/// perturb the very traces it's meant to observe. The default-off gate
+/// keeps the counter ready when a hunt needs it, and absent when the lab
+/// is recording.
+///
 /// Usage, at the top of an instrumented `body`:
 ///
 /// ```swift
@@ -24,11 +32,24 @@ import VoidReaderCore
 /// }
 /// ```
 ///
+/// To enable during a hunt:
+///
+/// ```bash
+/// VOID_READER_INVALIDATION_COUNTER=1 make run-debug
+/// ```
+///
 /// Ownership rule: whoever modifies an instrumented view (`BlockView`,
 /// `ContentView`, `MarkdownReaderView`) is responsible for verifying the
 /// counter still reports sensible numbers post-change. Reviewers enforce
 /// on PRs touching these views. See DEVELOPMENT.md "Invalidation Counters".
 public enum InvalidationCounter {
+
+    /// Evaluated once at first use; subsequent `tick()` calls are a single
+    /// bool read when disabled. Gated via env var rather than compile flag
+    /// so perf-lab runs and development hunts share one binary.
+    private static let enabled: Bool = {
+        ProcessInfo.processInfo.environment["VOID_READER_INVALIDATION_COUNTER"] == "1"
+    }()
 
     private static let queue = DispatchQueue(label: "place.wabash.VoidReader.invalidationCounter")
     private static var counts: [String: Int] = [:]
@@ -40,10 +61,12 @@ public enum InvalidationCounter {
     private static let reportThrottle: TimeInterval = 1.0
 
     /// Increment the counter for the named view. Call at the top of `body`.
-    /// Returns Void so it's safe to assign via `let _ = tick(...)`.
+    /// No-op unless `VOID_READER_INVALIDATION_COUNTER=1` is set.
+    /// Returns 0 when disabled (the counter is advisory, not load-bearing).
     @discardableResult
     public static func tick(_ viewName: String) -> Int {
-        queue.sync {
+        guard enabled else { return 0 }
+        return queue.sync {
             let now = Date()
             let next = (counts[viewName] ?? 0) + 1
             counts[viewName] = next

@@ -93,6 +93,7 @@ OUTPUT_DIR="$REPO_ROOT/build/traces"
 mkdir -p "$OUTPUT_DIR"
 TRACE_PATH="$OUTPUT_DIR/${SCENARIO}-${TIMESTAMP}.trace"
 XML_PATH="$OUTPUT_DIR/${SCENARIO}-${TIMESTAMP}.xml"
+SIGNPOSTS_PATH="$OUTPUT_DIR/${SCENARIO}-${TIMESTAMP}.signposts.xml"
 XCTRACE_LOG_PATH="$OUTPUT_DIR/${SCENARIO}-${TIMESTAMP}.xctrace.log"
 
 FIXTURE="${FIXTURE:-$DEFAULT_FIXTURE}"
@@ -166,12 +167,31 @@ if (( xctrace_exit != 0 )); then
     echo "[run_scenario] note: xctrace exited $xctrace_exit but reported clean recording — child-process exit propagation, continuing" >&2
 fi
 
-# Export XML for the parser
-echo "[run_scenario] exporting XML" >&2
+# Export XML for the parser — two schemas, two purposes:
+#   - time-profile: stack-sampling data consumed by parse_trace.py's hot-
+#     signature analysis (idle/work split, leaf frames, app-anywhere).
+#   - os-signpost-interval: begin/end pairs consumed by parse_signposts.py
+#     for per-operation p50/p95 stats. Needed by sweep.sh for size-sweep
+#     tables. Without this export, sweep.sh would have no signpost data to
+#     aggregate and its tables would always render as "(no intervals)".
+echo "[run_scenario] exporting time-profile XML" >&2
 xctrace export \
     --input "$TRACE_PATH" \
     --xpath '/trace-toc/run[1]/data/table[@schema="time-profile"]' \
     --output "$XML_PATH"
+
+echo "[run_scenario] exporting signpost-intervals XML" >&2
+# Signpost-intervals export is best-effort: a trace with zero emitted
+# signposts produces an empty table, which xctrace exports as an empty file
+# or errors out depending on Xcode version. Either outcome is tolerable —
+# downstream tools handle empty intervals as "no data for this trace"
+# rather than as a hard failure.
+xctrace export \
+    --input "$TRACE_PATH" \
+    --xpath '/trace-toc/run[1]/data/table[@schema="os-signpost-interval"]' \
+    --output "$SIGNPOSTS_PATH" 2>&1 \
+    | tee -a "$XCTRACE_LOG_PATH" \
+    || echo "[run_scenario] note: signpost-intervals export had no data (benign if the scenario didn't emit signposts)" >&2
 
 # Parse and print the hot-signature report. All interpretation lives in Python.
 echo "[run_scenario] parsing hot signatures" >&2
@@ -181,5 +201,6 @@ python3 "$SCRIPT_DIR/parse_trace.py" "$XML_PATH" \
     --top 15
 
 echo "[run_scenario] done" >&2
-echo "  trace: $TRACE_PATH" >&2
-echo "  xml:   $XML_PATH" >&2
+echo "  trace:     $TRACE_PATH" >&2
+echo "  xml:       $XML_PATH" >&2
+echo "  signposts: $SIGNPOSTS_PATH" >&2

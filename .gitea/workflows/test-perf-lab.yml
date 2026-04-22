@@ -59,11 +59,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Require GUI session
+      # Lab is artifact-upload-only — a missing GUI session degrades to an
+      # empty trace artifact, not a red build. Warn so the missing-GUI case is
+      # visible in logs, but don't gate subsequent steps (they'll fail gracefully
+      # and the `if-no-files-found: warn` uploads make the absence legible).
+      - name: Check GUI session
         run: |
           if ! pgrep -x WindowServer > /dev/null 2>&1; then
-            echo "::error::No GUI session — WindowServer is not running."
-            exit 1
+            echo "::warning::No GUI session — WindowServer is not running. Trace capture will likely produce empty artifacts."
           fi
 
       - name: Generate Xcode project
