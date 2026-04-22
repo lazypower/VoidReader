@@ -91,16 +91,62 @@ public struct TaskItem: Identifiable {
     }
 }
 
+/// One slice of a logical code block that has been split into multiple
+/// renderable rows. Segments of the same logical block share `groupID` and
+/// the same `fullCode` reference; `indexInGroup` and `totalInGroup` let the
+/// view layer decide which segment shows the language badge / copy button
+/// and where to round corners.
+public struct CodeSegment: Equatable {
+    public let groupID: UUID
+    public let indexInGroup: Int
+    public let totalInGroup: Int
+    public let fullCode: String
+
+    public init(groupID: UUID, indexInGroup: Int, totalInGroup: Int, fullCode: String) {
+        self.groupID = groupID
+        self.indexInGroup = indexInGroup
+        self.totalInGroup = totalInGroup
+        self.fullCode = fullCode
+    }
+
+    public var isFirst: Bool { indexInGroup == 0 }
+    public var isLast: Bool { indexInGroup == totalInGroup - 1 }
+}
+
 /// Data for a code block with language info.
 public struct CodeBlockData: Identifiable {
     public let id = UUID()
     public var code: String
     public var language: String?
 
-    public init(code: String, language: String?) {
+    /// Non-nil when this block is one slice of a larger logical code block
+    /// that was split for rendering. Nil for ordinary single-row code blocks.
+    public var segment: CodeSegment?
+
+    public init(code: String, language: String?, segment: CodeSegment? = nil) {
         self.code = code
         self.language = language
+        self.segment = segment
     }
+
+    /// True when this block is part of a segmented group.
+    public var isSegmented: Bool { segment != nil }
+
+    /// Size of the logical (pre-segmentation) code block this row belongs to.
+    /// Equals `code.count` for ordinary blocks and `segment.fullCode.count` for
+    /// slices of a split block. Lets the view layer pick a renderer based on
+    /// the visual total rather than the per-row slice — the "large origin"
+    /// signal, independent of how segmentation chooses to slice.
+    public var originalBlockSize: Int {
+        segment?.fullCode.count ?? code.count
+    }
+
+    /// True for the first segment (or any non-segmented block — non-segmented
+    /// blocks render the badge + copy button just like a first segment does).
+    public var isSegmentFirst: Bool { segment?.isFirst ?? true }
+
+    /// True for the last segment (or any non-segmented block).
+    public var isSegmentLast: Bool { segment?.isLast ?? true }
 }
 
 /// Data for a mermaid diagram.

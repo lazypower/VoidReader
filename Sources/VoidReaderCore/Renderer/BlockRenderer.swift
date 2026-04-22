@@ -5,17 +5,84 @@ import SwiftUI
 /// Renders markdown to an array of content blocks, supporting tables and task lists.
 public struct BlockRenderer {
 
+    /// Line count above which a fenced code block is split into multiple
+    /// `CodeSegment`-bearing `.codeBlock` entries. At typical code font
+    /// metrics (~16pt line height), 800 lines ≈ 12,800pt — well under the
+    /// SwiftUI `ScrollView` hit-test ceiling (~50k pt) that pathological
+    /// single blocks were crossing. Below the threshold, the block renders
+    /// as a single row exactly as before.
+    public static let segmentationLineThreshold = 800
+
+    /// Split a code block's raw source into `segmentationLineThreshold`-line
+    /// slices, joined by a shared `groupID`. Returns a single-element array
+    /// for blocks under the threshold (no segment metadata attached).
+    static func segmentCodeBlock(code: String, language: String?) -> [CodeBlockData] {
+        // Split on newlines into Substrings. `split(omittingEmptySubsequences:
+        // false)` matches `components(separatedBy:)` semantics (trailing \n
+        // yields a final empty element) without allocating a [String] copy of
+        // every line — material for the pathological-fence case this feature
+        // targets. Substring is a copy-on-write view into `code`.
+        let lines = code.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.count > segmentationLineThreshold else {
+            return [CodeBlockData(code: code, language: language)]
+        }
+
+        let groupID = UUID()
+        let fullCode = code
+        var segments: [CodeBlockData] = []
+        var start = 0
+        let perSegment = segmentationLineThreshold
+
+        while start < lines.count {
+            let end = min(start + perSegment, lines.count)
+            let slice = lines[start..<end].joined(separator: "\n")
+            segments.append(CodeBlockData(
+                code: slice,
+                language: language,
+                segment: nil  // placeholder; filled in below once total is known
+            ))
+            start = end
+        }
+
+        let total = segments.count
+        for i in 0..<total {
+            segments[i] = CodeBlockData(
+                code: segments[i].code,
+                language: language,
+                segment: CodeSegment(
+                    groupID: groupID,
+                    indexInGroup: i,
+                    totalInGroup: total,
+                    fullCode: fullCode
+                )
+            )
+        }
+        return segments
+    }
+
     /// Renders markdown text to an array of content blocks.
     public static func render(_ text: String, style: MarkdownRenderer.Style = .init()) -> [MarkdownBlock] {
         let charCount = text.count
+        let byteCount = text.utf8.count
 
-        return DebugLog.measure(.rendering, "BlockRenderer.render(\(charCount) chars)") {
+        // Signpost: parseMarkdown — bytes attached at begin, produced-node count at end (only
+        // known after the walk completes). Uses raw signposter so OSLogMessage interpolation
+        // stays lazy when not recording.
+        let signposter = Signposts.signposter(for: .rendering)
+        let signpostID = signposter.makeSignpostID()
+        let signpostState = signposter.beginInterval(
+            "parseMarkdown",
+            id: signpostID,
+            "bytes=\(byteCount)"
+        )
+
+        let allBlocks: [MarkdownBlock] = DebugLog.measure(.rendering, "BlockRenderer.render(\(charCount) chars)") {
             // Pre-process to extract math blocks ($$...$$)
             let segments = DebugLog.measure(.rendering, "  extractMathBlocks") {
                 extractMathBlocks(from: text)
             }
 
-            var allBlocks: [MarkdownBlock] = []
+            var blocks: [MarkdownBlock] = []
 
             for segment in segments {
                 switch segment {
@@ -29,18 +96,21 @@ public struct BlockRenderer {
                         var walker = BlockWalker(style: style)
                         walker.visit(document)
                         walker.flushTextBuffer()
-                        allBlocks.append(contentsOf: walker.blocks)
+                        blocks.append(contentsOf: walker.blocks)
                     }
 
                 case .math(let latex):
                     // Add math block directly
-                    allBlocks.append(.mathBlock(MathData(latex: latex, isBlock: true)))
+                    blocks.append(.mathBlock(MathData(latex: latex, isBlock: true)))
                 }
             }
 
-            DebugLog.log(.rendering, "  → produced \(allBlocks.count) blocks")
-            return allBlocks
+            DebugLog.log(.rendering, "  → produced \(blocks.count) blocks")
+            return blocks
         }
+
+        signposter.endInterval("parseMarkdown", signpostState, "nodes=\(allBlocks.count)")
+        return allBlocks
     }
 
     /// Segments of content: either markdown text or math blocks
@@ -215,10 +285,13 @@ struct BlockWalker: MarkupWalker {
         if codeBlock.language?.lowercased() == "mermaid" {
             blocks.append(.mermaid(MermaidData(source: code)))
         } else {
-            blocks.append(.codeBlock(CodeBlockData(
-                code: code,
-                language: codeBlock.language
-            )))
+            // Split over-tall code blocks into segments. For blocks under
+            // the threshold this returns a single-element array with
+            // `segment == nil`, preserving the pre-change shape.
+            let segments = BlockRenderer.segmentCodeBlock(code: code, language: codeBlock.language)
+            for segment in segments {
+                blocks.append(.codeBlock(segment))
+            }
         }
     }
 

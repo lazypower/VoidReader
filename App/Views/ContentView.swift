@@ -70,12 +70,41 @@ struct ContentView: View {
     @State private var caseSensitive = false
     @State private var useRegex = false
     @State private var searchMatches: [TextSearcher.Match] = []
+    /// Captured substrings for each match, parallel to `searchMatches`. Populated
+    /// once per search update so `currentMatchText` is a cheap array index
+    /// instead of re-searching `document.text` on every SwiftUI re-render.
+    @State private var matchTexts: [String] = []
     @State private var currentMatchIndex = 0
 
     // Cached rendered blocks (expensive to compute)
     @State private var renderedBlocks: [MarkdownBlock] = []
     @State private var isRendering = false
     @State private var renderTask: Task<Void, Never>?
+    /// Guard for the `firstPaint` signpost event so it fires exactly once per
+    /// document-open lifecycle. Reset to false in `reloadFromDisk()` so the next paint
+    /// after a reload re-fires it (paired with the `reloadFromDisk` interval).
+    @State private var firstPaintFired = false
+
+    /// Document-scoped cache of TextKit-measured `(attributed, height)`
+    /// for large code blocks. Populated off-main by `prefetchCodeBlockMeasurements`
+    /// as soon as blocks arrive from the parser, and injected into the
+    /// reader view tree via environment. Cleared on document change.
+    @State private var codeBlockMeasurementCache = CodeBlockMeasurementCache()
+
+    /// Document-scoped cache of measured column widths / row heights for
+    /// large tables. Populated off-main by `prefetchTableMeasurements`
+    /// as soon as blocks arrive, and injected into the reader view tree via
+    /// environment. Cleared on document change. Mirrors the code-block
+    /// measurement cache pattern.
+    @State private var tableMeasurementCache = TableMeasurementCache()
+
+    /// Authoritative document-wide height index. Sidesteps SwiftUI's
+    /// `LazyVStack`-biased `GeometryReader`-reported content height (which
+    /// grows as rows materialize) with a prefix-sum over per-block heights
+    /// — measured where we have them, fallback-estimated otherwise. This
+    /// is what `updateScrollPercent` divides by, so the percentage no
+    /// longer jumps when the user scrolls into unmaterialized regions.
+    @StateObject private var documentHeightIndex = DocumentHeightIndex()
 
     // Lint warnings
     @State private var lintWarnings: [LintWarning] = []
@@ -164,7 +193,24 @@ struct ContentView: View {
         }
         .cheatSheetOnHold(isShowing: $showCheatSheet)
         .onAppear {
+            // Signpost: openDocument interval — spans the .onAppear setup work.
+            // Ends after the initial render handoff (sync path returns or progressive path
+            // assigns initialBlocks); see Signposts.lifecycle docstring for boundaries.
+            let signposter = Signposts.signposter(for: .lifecycle)
+            let bytes = document.text.utf8.count
+            let ext = fileURL?.pathExtension ?? ""
+            let state = signposter.beginInterval(
+                "openDocument",
+                id: signposter.makeSignpostID(),
+                "bytes=\(bytes) ext=\(ext)"
+            )
+            defer { signposter.endInterval("openDocument", state) }
+
             DebugLog.info(.lifecycle, "ContentView.onAppear - \(fileURL?.lastPathComponent ?? "untitled") (\(document.text.count) chars)")
+            #if DEBUG
+            // DIAGNOSTIC: confirm whether signposts are enabled at runtime.
+            DebugLog.info(.lifecycle, "Signposts.lifecycle.isEnabled=\(Signposts.lifecycle.isEnabled) rendering.isEnabled=\(Signposts.rendering.isEnabled)")
+            #endif
             DebugLog.logMemory(.lifecycle, context: "Document open")
             setupDebouncing()
             updateHeadings(from: document.text)
@@ -180,7 +226,9 @@ struct ContentView: View {
             lintUpdatePublisher.send(newValue)
         }
         .onDisappear {
-            fileWatcher?.stop()
+            Signposts.interval("closeDocument", category: .lifecycle) {
+                fileWatcher?.stop()
+            }
         }
         .alert("File Changed", isPresented: $showExternalChangeAlert) {
             Button("Reload") { reloadFromDisk() }
@@ -509,10 +557,38 @@ struct ContentView: View {
         // Cancel any in-progress render
         renderTask?.cancel()
 
+        // Invalidate the measurement cache by swapping in fresh instances
+        // rather than awaiting `clear()`. Reason: a fire-and-forget
+        // `Task { await cache.clear() }` can race with the prefetch writes
+        // kicked off just below (`prefetchCodeBlockMeasurements()`), wiping
+        // entries that were populating for the new document. Swapping
+        // instances sidesteps the race entirely — SwiftUI re-publishes the
+        // new cache through `.environment(\.codeBlockMeasurementCache, …)`,
+        // the old instance GCs once any in-flight writes land on it (those
+        // writes are harmless and never read back).
+        codeBlockMeasurementCache = CodeBlockMeasurementCache()
+        tableMeasurementCache = TableMeasurementCache()
+
+        let renderingSignposter = Signposts.signposter(for: .rendering)
+
         // For small documents, render synchronously to avoid flicker
         if text.count < 50_000 {
             DebugLog.log(.rendering, "updateRenderedBlocks: sync path (\(text.count) chars)")
-            renderedBlocks = BlockRenderer.render(text, style: renderStyle)
+            // Signpost: renderBatch index=0 — sync path is one batch covering the full doc.
+            // parseMarkdown nests inside this interval (BlockRenderer.render emits it).
+            let state = renderingSignposter.beginInterval(
+                "renderBatch",
+                id: renderingSignposter.makeSignpostID(),
+                "index=0 mode=sync"
+            )
+            let blocks = BlockRenderer.render(text, style: renderStyle)
+            renderingSignposter.endInterval("renderBatch", state, "blocks=\(blocks.count)")
+
+            renderedBlocks = blocks
+            reconfigureHeightIndex()
+            prefetchCodeBlockMeasurements()
+        prefetchTableMeasurements()
+            emitFirstPaintIfNeeded(blockCount: blocks.count)
             return
         }
 
@@ -524,14 +600,33 @@ struct ContentView: View {
         isRendering = true
         let style = renderStyle  // Capture value type
 
-        // Step 1: Immediately render the first chunk (first ~20KB or first 500 lines)
-        let firstChunkEnd = findFirstChunkEnd(in: text)
+        // Step 1: Immediately render the first chunk. The chunker parses the
+        // document AST once and cuts at the first top-level block boundary
+        // past ~20KB — so code fences, lists, and blockquotes never get split
+        // mid-structure. See MarkdownChunker for the rationale.
+        let firstChunkEnd = MarkdownChunker.findFirstChunkEnd(in: text)
         let firstChunk = String(text.prefix(firstChunkEnd))
 
+        // Signpost: renderBatch index=0 — initial progressive chunk.
+        let initialState = renderingSignposter.beginInterval(
+            "renderBatch",
+            id: renderingSignposter.makeSignpostID(),
+            "index=0 mode=initial"
+        )
         let initialBlocks = DebugLog.measure(.rendering, "Initial chunk (\(firstChunk.count) chars)") {
             BlockRenderer.render(firstChunk, style: style)
         }
+        renderingSignposter.endInterval("renderBatch", initialState, "blocks=\(initialBlocks.count)")
+
         renderedBlocks = initialBlocks
+        reconfigureHeightIndex()
+        // Kick off off-main measurement for the first chunk's code blocks
+        // immediately — by the time the user starts scrolling, the prefetch
+        // is usually done and large code blocks render at their authoritative
+        // height from the first frame (no async post-layout height shift).
+        prefetchCodeBlockMeasurements()
+        prefetchTableMeasurements()
+        emitFirstPaintIfNeeded(blockCount: initialBlocks.count)
         DebugLog.log(.rendering, "  → Initial \(initialBlocks.count) blocks shown immediately")
 
         // If we rendered everything in the first chunk, we're done
@@ -545,13 +640,25 @@ struct ContentView: View {
         let remainingText = String(text.dropFirst(firstChunkEnd))
 
         renderTask = Task {
+            // Signpost: renderBatch index=1 — background continuation. The interval spans the
+            // detached parse + the main-actor append so the trace shows the full latency from
+            // "background work started" to "blocks visible".
+            let bgState = renderingSignposter.beginInterval(
+                "renderBatch",
+                id: renderingSignposter.makeSignpostID(),
+                "index=1 mode=background"
+            )
+
             let moreBlocks = await DebugLog.measureAsync(.rendering, "Background render (\(remainingText.count) chars)") {
                 await Task.detached(priority: .userInitiated) {
                     BlockRenderer.render(remainingText, style: style)
                 }.value
             }
 
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                renderingSignposter.endInterval("renderBatch", bgState, "blocks=0 cancelled=1")
+                return
+            }
 
             await MainActor.run {
                 DebugLog.log(.rendering, "Appending \(moreBlocks.count) blocks...")
@@ -561,32 +668,133 @@ struct ContentView: View {
                 DebugLog.log(.rendering, "Block append took \(String(format: "%.2f", assignTime))ms")
                 DebugLog.log(.rendering, "  → Total \(renderedBlocks.count) blocks")
                 isRendering = false
+                reconfigureHeightIndex()
+                // Prefetch measurements for the full block list — the first
+                // chunk already kicked off its own; this re-runs and fast-path
+                // skips cache-hits, so only the newly-appended blocks produce
+                // real work.
+                prefetchCodeBlockMeasurements()
+        prefetchTableMeasurements()
                 DebugLog.logMemory(.perf, context: "After render complete")
+                renderingSignposter.endInterval("renderBatch", bgState, "blocks=\(moreBlocks.count)")
             }
         }
     }
 
-    /// Find the end of the first chunk - targets ~20KB or ~500 lines, whichever comes first.
-    /// Always ends at a line boundary to avoid breaking markdown elements.
-    private func findFirstChunkEnd(in text: String) -> Int {
-        let targetSize = 20_000  // ~20KB
-        let maxLines = 500
+    /// Emit the `firstPaint` signpost event once per document-open lifecycle. Called after the
+    /// first non-empty `renderedBlocks` assignment. The actual on-screen paint follows the
+    /// state mutation by ~1 SwiftUI frame; this is the closest hook without coupling into
+    /// LazyVStack's child lifecycle.
+    private func emitFirstPaintIfNeeded(blockCount: Int) {
+        guard !firstPaintFired, blockCount > 0 else { return }
+        firstPaintFired = true
+        Signposts.event("firstPaint", category: .rendering)
+    }
 
-        var lineCount = 0
-        var charCount = 0
+    /// Dispatches off-main measurement for every large code block currently
+    /// in `renderedBlocks`. Each enqueue is idempotent — cache hits
+    /// short-circuit without touching the measurement queue — so calling
+    /// this multiple times as the block list grows is safe.
+    ///
+    /// Large-block threshold matches `CodeBlockView.maxSwiftUITextChars`.
+    /// Small blocks are not prefetched because they render on SwiftUI
+    /// `Text`'s intrinsic-sizing path, which doesn't have the async
+    /// height-shift problem this cache solves.
+    ///
+    /// On completion (including cache-hit fast path), each measurement is
+    /// also recorded into `documentHeightIndex` at the block's index so
+    /// the prefix-sum totalHeight converges to the authoritative value.
+    private func prefetchCodeBlockMeasurements() {
+        let fontFamily = resolvedCodeFontFamily
+        let fontSize = CGFloat(readerFontSize * 0.875)
+        let themeName = CodeBlockView.themeName(for: effectiveColorScheme)
+        let cache = codeBlockMeasurementCache
+        let blocks = renderedBlocks
+        let heightIndex = documentHeightIndex
 
-        for char in text {
-            charCount += 1
-            if char == "\n" {
-                lineCount += 1
-                // Stop if we hit either limit
-                if charCount >= targetSize || lineCount >= maxLines {
-                    return charCount
-                }
+        for (index, block) in blocks.enumerated() {
+            // Match the renderer's gate: any block whose *original* (pre-
+            // segmentation) size exceeds the threshold takes the NSTextView
+            // path and therefore needs its measurement warmed. Using the
+            // per-slice `code.count` here would miss every segment of a
+            // split block — they'd each show the placeholder on first paint
+            // and do their own late measurement, re-introducing the
+            // post-paint height shift this prefetch exists to prevent.
+            guard case .codeBlock(let data) = block,
+                  data.originalBlockSize > CodeBlockView.maxSwiftUITextChars else { continue }
+
+            CodeBlockMeasurementScheduler.enqueueIfNeeded(
+                code: data.code,
+                language: data.language,
+                fontName: fontFamily ?? "",
+                fontSize: fontSize,
+                themeName: themeName,
+                cache: cache
+            ) { _, result in
+                // Feed the authoritative height into the document-wide
+                // index so totalHeight stops under-reporting as rows
+                // outside the materialized window land their measurements.
+                heightIndex.recordHeight(result.height, at: index)
             }
         }
+    }
 
-        return text.count  // Document is smaller than our target
+    /// Dispatches off-main measurement for every large table currently in
+    /// `renderedBlocks`. Each enqueue is idempotent — cache hits
+    /// short-circuit without queueing work. Mirrors
+    /// `prefetchCodeBlockMeasurements`.
+    ///
+    /// The virtualization threshold matches
+    /// `TableBlockView.virtualizationThreshold` — below it, tables render
+    /// via SwiftUI `Grid` and don't need a pre-measured column-width pass.
+    private func prefetchTableMeasurements() {
+        let cache = tableMeasurementCache
+        let blocks = renderedBlocks
+
+        for block in blocks {
+            guard case .table(let data) = block,
+                  data.rows.count >= TableBlockView.virtualizationThreshold else { continue }
+
+            TableMeasurementScheduler.enqueueIfNeeded(
+                data: data,
+                bodyFontSize: 14,
+                headerFontSize: 14,
+                cache: cache
+            ) { _, _ in
+                // Intentionally empty — TableBlockView reads the cache via
+                // environment on `.onAppear` and swaps from placeholder to
+                // measured layout. No document-height feedback needed: the
+                // placeholder is already at the authoritative total height.
+            }
+        }
+    }
+
+    /// Reset the document height index for the current block list. Called
+    /// on every `renderedBlocks` assignment. The fallback closure captures
+    /// the current block array and code-font line metrics; re-running this
+    /// for a superset of blocks invalidates prior measurements — which is
+    /// fine because the cache still holds them and the prefetch re-fires
+    /// and re-records (cheap: cache hits, no TextKit work).
+    private func reconfigureHeightIndex() {
+        let codeFont = CodeBlockView.nsFont(
+            family: resolvedCodeFontFamily,
+            size: CGFloat(readerFontSize * 0.875)
+        )
+        // Snapshot blocks so the spacing closure doesn't re-read the
+        // @State array on every invocation (the index queries once per
+        // block during rebuild).
+        let snapshot = renderedBlocks
+        documentHeightIndex.configure(
+            blockCount: snapshot.count,
+            blockSpacing: 16,
+            fallback: DocumentHeightIndex.defaultFallback(
+                for: snapshot,
+                codeFont: codeFont
+            ),
+            spacingProvider: { index in
+                BlockSpacing.topSpacing(at: index, in: snapshot)
+            }
+        )
     }
 
     private func scrollToHeading(_ heading: HeadingInfo) {
@@ -637,22 +845,17 @@ struct ContentView: View {
             searchText = ""
             replaceText = ""
             searchMatches = []
+            matchTexts = []
             currentMatchIndex = 0
         }
     }
 
     /// The text of the current match (for replacement preview).
+    /// Reads from the `matchTexts` cache populated by `updateSearch` — avoids
+    /// re-running `TextSearcher.findMatches` on every SwiftUI re-render.
     private var currentMatchText: String? {
-        guard !searchMatches.isEmpty, currentMatchIndex < searchMatches.count else { return nil }
-        let matches = TextSearcher.findMatches(
-            query: searchText,
-            in: document.text,
-            caseSensitive: caseSensitive,
-            useRegex: useRegex
-        )
-        guard currentMatchIndex < matches.count else { return nil }
-        let match = matches[currentMatchIndex]
-        return String(document.text[match.range])
+        guard currentMatchIndex < matchTexts.count else { return nil }
+        return matchTexts[currentMatchIndex]
     }
 
     private func showFindAndReplace() {
@@ -665,17 +868,24 @@ struct ContentView: View {
     private func updateSearch() {
         guard !searchText.isEmpty else {
             searchMatches = []
+            matchTexts = []
             currentMatchIndex = 0
             return
         }
         // Count matches in rendered blocks (same as highlighting uses)
-        searchMatches = countMatchesInRenderedBlocks()
-        currentMatchIndex = searchMatches.isEmpty ? 0 : 0
+        let (matches, texts) = countMatchesInRenderedBlocks()
+        searchMatches = matches
+        matchTexts = texts
+        currentMatchIndex = 0
     }
 
-    /// Counts matches in the rendered block text (not raw markdown).
-    private func countMatchesInRenderedBlocks() -> [TextSearcher.Match] {
+    /// Counts matches in the rendered block text (not raw markdown) and
+    /// captures the matched substring for each. Returning the texts alongside
+    /// the matches lets `currentMatchText` skip a full-document re-search on
+    /// every SwiftUI re-render.
+    private func countMatchesInRenderedBlocks() -> (matches: [TextSearcher.Match], texts: [String]) {
         var allMatches: [TextSearcher.Match] = []
+        var allTexts: [String] = []
 
         for block in renderedBlocks {
             if case .text(let attrString) = block {
@@ -686,11 +896,14 @@ struct ContentView: View {
                     caseSensitive: caseSensitive,
                     useRegex: useRegex
                 )
-                allMatches.append(contentsOf: matches)
+                for match in matches {
+                    allMatches.append(match)
+                    allTexts.append(String(blockText[match.range]))
+                }
             }
         }
 
-        return allMatches
+        return (allMatches, allTexts)
     }
 
     private func findNext() {
@@ -828,6 +1041,16 @@ struct ContentView: View {
     private func reloadFromDisk() {
         guard let url = fileURL else { return }
 
+        // Signpost is placed after the early-return guard so a 0-duration "no fileURL" case
+        // doesn't pollute the trace — only real reload work shows up on the timeline.
+        let signposter = Signposts.signposter(for: .lifecycle)
+        let state = signposter.beginInterval("reloadFromDisk")
+        defer { signposter.endInterval("reloadFromDisk", state) }
+
+        // Reset firstPaint guard so the post-reload render emits a fresh `firstPaint` event,
+        // paired with this `reloadFromDisk` interval per design.md.
+        firstPaintFired = false
+
         // Prefer NSDocument.revert so the reload does not mark the document dirty.
         // SwiftUI's DocumentGroup owns an NSDocument under the hood; revert re-reads
         // the file through the normal FileDocument.init(configuration:) path and
@@ -884,6 +1107,13 @@ struct ContentView: View {
                         // Anchor at top for scroll restoration
                         Color.clear.frame(height: 1).id("top")
 
+                        #if DEBUG
+                        // Debug-only: programmatic autoscroll driver for
+                        // profile runs. No-ops unless VOID_READER_AUTOSCROLL=1.
+                        ScrollAutoDriver()
+                            .frame(width: 0, height: 0)
+                        #endif
+
                         MarkdownReaderViewWithAnchors(
                             text: document.text,
                             headings: headings,
@@ -900,6 +1130,9 @@ struct ContentView: View {
                             onScrollProgress: handleScrollProgress,
                             onMermaidExpand: handleMermaidExpand
                         )
+                        .environment(\.codeBlockMeasurementCache, codeBlockMeasurementCache)
+                        .environment(\.tableMeasurementCache, tableMeasurementCache)
+                        .environment(\.documentHeightIndex, documentHeightIndex)
                         .environment(\.onImageExpand, handleImageExpand)
                         .environment(\.openURL, OpenURLAction { url in
                             return handleLinkClick(url)
@@ -979,6 +1212,14 @@ struct ContentView: View {
                 guard !isRendering, !searchMatches.isEmpty else { return }
                 scrollToMatch(0, proxy: proxy)
             }
+            .onChange(of: documentHeightIndex.totalHeight) { _, _ in
+                // As per-block measurements land out of order (prefetch
+                // storm → serialized rebuild), totalHeight walks toward
+                // its final value. Rerun the percent math each time so
+                // the status bar tracks the authoritative number rather
+                // than the stale first-build estimate.
+                updateScrollPercent(offset: scrollOffsetForPercent)
+            }
         }
         .frame(maxWidth: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
@@ -1023,7 +1264,14 @@ struct ContentView: View {
         }
     }
 
-    /// Update scroll percentage based on scroll offset
+    /// Update scroll percentage based on scroll offset.
+    ///
+    /// Denominator comes from `documentHeightIndex.totalHeight` — the
+    /// prefix-sum over per-block heights — not from SwiftUI's
+    /// `GeometryReader`-reported content height. The latter under-reports
+    /// when `LazyVStack` hasn't materialized later rows, which was causing
+    /// the scroll % to saturate at 100% partway through large docs
+    /// (symptom: "jumps from 52% to 100% as I scroll down").
     private func updateScrollPercent(offset: CGFloat) {
         // Store offset for later recalculation when dimensions change
         scrollOffsetForPercent = offset
@@ -1031,11 +1279,11 @@ struct ContentView: View {
         // Skip if in edit mode
         guard !isEditMode else { return }
 
-        let percent = ScrollPercentage.calculate(
+        let fraction = documentHeightIndex.scrollFraction(
             offset: offset,
-            contentHeight: contentHeight,
             visibleHeight: visibleHeight
         )
+        let percent = Int((fraction * 100).rounded())
 
         // Only update if changed
         if percent != displayedPercentRead {
@@ -1153,6 +1401,9 @@ struct ContentView: View {
                         onTaskToggle: handleTaskToggle,
                         onMermaidExpand: handleMermaidExpand
                     )
+                    .environment(\.codeBlockMeasurementCache, codeBlockMeasurementCache)
+                    .environment(\.tableMeasurementCache, tableMeasurementCache)
+                    .environment(\.documentHeightIndex, documentHeightIndex)
                     .environment(\.onImageExpand, handleImageExpand)
                     .environment(\.openURL, OpenURLAction { url in
                         return handleLinkClick(url)

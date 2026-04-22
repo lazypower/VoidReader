@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import VoidReaderCore
 
 /// Observes scroll position at the NSScrollView level for efficient percentage tracking.
 /// This avoids SwiftUI's view update cycle for better performance on large documents.
@@ -25,6 +26,13 @@ private class ScrollObserverView: NSView {
     private var scrollView: NSScrollView?
     private var debounceTask: DispatchWorkItem?
     private var lastReportedPercent: Int = -1
+
+    /// Counter for sampled `scrollTick` signpost emission. We always emit on tick #1 of a
+    /// burst (so brief scrolls register) and then every Nth tick (so long scrolls show as
+    /// a density envelope rather than timeline static). Reset to 0 in `reportPosition`
+    /// when the debounced "scroll settled" handler runs, so each burst is independent.
+    private var scrollTickCounter: Int = 0
+    private static let scrollTickSampleEvery = 10
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -59,6 +67,15 @@ private class ScrollObserverView: NSView {
     }
 
     @objc private func scrollDidChange(_ notification: Notification) {
+        // Sampled scrollTick signpost. Full-rate emission (~60Hz under active scrolling)
+        // would drown the Instruments timeline; sampling at every 10th tick gives ~6Hz
+        // density — enough to see the gesture envelope without static. Tick #1 is always
+        // emitted so brief scrolls (< sample window) still show up in the trace.
+        scrollTickCounter += 1
+        if scrollTickCounter == 1 || scrollTickCounter % Self.scrollTickSampleEvery == 0 {
+            Signposts.event("scrollTick", category: .scroll)
+        }
+
         // Debounce updates - only report after scroll stops
         debounceTask?.cancel()
 
@@ -72,6 +89,10 @@ private class ScrollObserverView: NSView {
     }
 
     private func reportPosition() {
+        // Debounced — fires when scroll has been quiet for 150ms. Reset the scrollTick
+        // sample counter so the next burst's tick #1 emits unconditionally.
+        scrollTickCounter = 0
+
         guard let scrollView = scrollView,
               let documentView = scrollView.documentView else { return }
 

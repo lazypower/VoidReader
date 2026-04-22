@@ -16,9 +16,17 @@ struct MarkdownReaderView: View {
         // Use provided blocks or render if empty (fallback for previews)
         let renderBlocks = blocks.isEmpty ? BlockRenderer.render(text) : blocks
 
-        LazyVStack(alignment: .leading, spacing: 16) {
-            ForEach(renderBlocks) { block in
+        // `spacing: 0` at the LazyVStack level; per-row top padding adds 16pt
+        // between ordinary blocks but 0 between same-group code segments,
+        // so a segmented code block renders with no visible seams.
+        LazyVStack(alignment: .leading, spacing: 0) {
+            // Identity tracks block.id, not index. Index-based identity
+            // caused SwiftUI to reuse CodeBlockView @State (highlighted +
+            // measurement caches) across different blocks when the block
+            // list regenerated on edit/reload/settings change.
+            ForEach(Array(renderBlocks.enumerated()), id: \.element.id) { index, block in
                 blockView(for: block)
+                    .padding(.top, BlockSpacing.topSpacing(at: index, in: renderBlocks))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -112,6 +120,29 @@ private struct ScrollOffsetPreferenceKey: PreferenceKey {
     }
 }
 
+/// Block-to-block vertical spacing rules. Centralizes the "collapse spacing
+/// between same-group segments" decision so every LazyVStack/VStack path in
+/// the reader agrees, and so the scroll-percent math can mirror it via
+/// `DocumentHeightIndex`'s spacing provider.
+enum BlockSpacing {
+    /// Inter-block spacing used by the reader's `LazyVStack` rows.
+    static let interBlock: CGFloat = 16
+
+    /// Top padding for block at `index`. Returns 0 for the first block
+    /// (nothing above it) and for any code segment that continues the
+    /// previous block's segmentation group; returns `interBlock` otherwise.
+    static func topSpacing(at index: Int, in blocks: [MarkdownBlock]) -> CGFloat {
+        guard index > 0 else { return 0 }
+        if case .codeBlock(let curr) = blocks[index],
+           case .codeBlock(let prev) = blocks[index - 1],
+           let a = curr.segment, let b = prev.segment,
+           a.groupID == b.groupID {
+            return 0
+        }
+        return interBlock
+    }
+}
+
 /// Renders markdown with block-level anchors for scroll navigation.
 /// Uses LazyVStack for virtual scrolling performance on large documents.
 struct MarkdownReaderViewWithAnchors: View {
@@ -162,12 +193,17 @@ struct MarkdownReaderViewWithAnchors: View {
     /// Direct rendering for smaller documents (< 1000 blocks)
     @ViewBuilder
     private func directContent(blocks renderBlocks: [MarkdownBlock]) -> some View {
-        LazyVStack(alignment: .leading, spacing: 16) {
+        // Same pattern as `MarkdownReaderView.body`: spacing at the stack
+        // level is 0 so segmented code blocks can collapse their inter-row
+        // gap; `BlockSpacing.topSpacing` adds 16pt everywhere else.
+        LazyVStack(alignment: .leading, spacing: 0) {
             // Scroll tracker at top of content
             scrollTracker
 
-            ForEach(renderBlocks.indices, id: \.self) { index in
+            // Identity tracks block.id, not index — see MarkdownReaderView.body.
+            ForEach(Array(renderBlocks.enumerated()), id: \.element.id) { index, _ in
                 blockContent(at: index, in: renderBlocks)
+                    .padding(.top, BlockSpacing.topSpacing(at: index, in: renderBlocks))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -227,8 +263,7 @@ struct MarkdownReaderViewWithAnchors: View {
         BlockView(
             block: renderBlocks[index],
             documentURL: documentURL,
-            searchText: searchText,
-            matchRanges: cachedMatchInfo.blockMatches[index] ?? [],
+            highlighted: cachedMatchInfo.blockHighlighted[index],
             codeFontSize: codeFontSize,
             codeFontFamily: codeFontFamily,
             onTaskToggle: onTaskToggle,
@@ -277,6 +312,11 @@ struct MarkdownReaderViewWithAnchors: View {
     struct MatchInfo {
         var blockMatches: [Int: [Range<String.Index>]] = [:] // block index -> match ranges in that block's text
         var blockToFirstMatch: [Int: Int] = [:] // block index -> first match index in that block
+        /// Pre-built highlighted copy of each block's AttributedString. Populated
+        /// once per search-key change so `BlockView.body` becomes a pure
+        /// `Text(cached)` read instead of rebuilding highlights on every
+        /// SwiftUI re-evaluation (which happens per arrow-key match navigation).
+        var blockHighlighted: [Int: AttributedString] = [:]
     }
 
     private func computeMatchInfo(blocks: [MarkdownBlock]) -> MatchInfo {
@@ -297,13 +337,56 @@ struct MarkdownReaderViewWithAnchors: View {
             )
 
             if !matches.isEmpty {
-                info.blockMatches[blockIdx] = matches.map { $0.range }
+                let ranges = matches.map { $0.range }
+                info.blockMatches[blockIdx] = ranges
                 info.blockToFirstMatch[blockIdx] = globalMatchIndex
+                info.blockHighlighted[blockIdx] = Self.buildHighlighted(
+                    original: attrString,
+                    originalText: blockText,
+                    matchRanges: ranges
+                )
                 globalMatchIndex += matches.count
             }
         }
 
         return info
+    }
+
+    /// Builds a highlighted `AttributedString` in a single forward pass.
+    ///
+    /// The old approach did `distance(from: startIndex, to: range.lowerBound)`
+    /// per match — O(N) per match, O(M·N) per block — and ran inside
+    /// `BlockView.body` on every re-render. This version walks both the
+    /// source `String` and the mutable `AttributedString` cursor forward in
+    /// lockstep, so each character is visited at most twice total regardless
+    /// of match count. Called once per search-key change; the result is
+    /// cached in `MatchInfo.blockHighlighted`.
+    private static func buildHighlighted(
+        original: AttributedString,
+        originalText: String,
+        matchRanges: [Range<String.Index>]
+    ) -> AttributedString {
+        var result = original
+        var attrCursor = result.startIndex
+        var textCursor = originalText.startIndex
+
+        for range in matchRanges {
+            // Advance to match start (cursor-relative, not from startIndex).
+            let preSpan = originalText.distance(from: textCursor, to: range.lowerBound)
+            let matchStart = result.index(attrCursor, offsetByCharacters: preSpan)
+
+            // Advance to match end.
+            let matchSpan = originalText.distance(from: range.lowerBound, to: range.upperBound)
+            let matchEnd = result.index(matchStart, offsetByCharacters: matchSpan)
+
+            result[matchStart..<matchEnd].backgroundColor = .yellow
+            result[matchStart..<matchEnd].foregroundColor = .black
+
+            attrCursor = matchEnd
+            textCursor = range.upperBound
+        }
+
+        return result
     }
 
     /// Finds which block contains the given heading text.
@@ -376,14 +459,21 @@ private struct ChunkView: View {
     private var estimatedHeight: CGFloat {
         var total: CGFloat = 0
         for i in startIndex..<endIndex {
-            total += blocks[i].estimatedHeight + 16 // Include spacing
+            let spacing = BlockSpacing.topSpacing(at: i, in: blocks)
+            total += blocks[i].estimatedHeight + spacing
         }
         return total
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            ForEach(startIndex..<endIndex, id: \.self) { index in
+        // `spacing: 0` + per-row top padding: identical scheme to
+        // `directContent` so segmented code blocks stay seamless across
+        // chunk boundaries as well.
+        VStack(alignment: .leading, spacing: 0) {
+            // Identity tracks block.id, not slot index — see MarkdownReaderView.body.
+            // `offset` is slice-local (0-based); global index is `startIndex + offset`.
+            ForEach(Array(blocks[startIndex..<endIndex].enumerated()), id: \.element.id) { offset, _ in
+                let index = startIndex + offset
                 // Add match anchor if this block contains the current match
                 if let matchIdx = cachedMatchInfo.blockToFirstMatch[index], matchIdx == currentMatchIndex {
                     Color.clear.frame(height: 0).id("match-\(currentMatchIndex)")
@@ -392,13 +482,13 @@ private struct ChunkView: View {
                 BlockView(
                     block: blocks[index],
                     documentURL: documentURL,
-                    searchText: searchText,
-                    matchRanges: cachedMatchInfo.blockMatches[index] ?? [],
+                    highlighted: cachedMatchInfo.blockHighlighted[index],
                     codeFontSize: codeFontSize,
                     codeFontFamily: codeFontFamily,
                     onTaskToggle: onTaskToggle,
                     onMermaidExpand: onMermaidExpand
                 )
+                .padding(.top, BlockSpacing.topSpacing(at: index, in: blocks))
                 .id("block-\(index)")
             }
         }
@@ -410,8 +500,11 @@ private struct ChunkView: View {
 private struct BlockView: View {
     let block: MarkdownBlock
     var documentURL: URL? = nil
-    var searchText: String = ""
-    var matchRanges: [Range<String.Index>] = []
+    /// Pre-highlighted copy of the block's text, when there are matches to
+    /// highlight. Built once per search-key change in `computeMatchInfo`, so
+    /// this closure just picks between the cached highlight and the plain
+    /// text — no per-render string/index walking.
+    var highlighted: AttributedString? = nil
     var codeFontSize: CGFloat = 13
     var codeFontFamily: String? = nil
     var onTaskToggle: ((Int, Bool) -> Void)?
@@ -420,13 +513,8 @@ private struct BlockView: View {
     var body: some View {
         switch block {
         case .text(let attributedString):
-            if !searchText.isEmpty && !matchRanges.isEmpty {
-                Text(highlightedString(attributedString))
-                    .textSelection(.enabled)
-            } else {
-                Text(attributedString)
-                    .textSelection(.enabled)
-            }
+            Text(highlighted ?? attributedString)
+                .textSelection(.enabled)
 
         case .table(let tableData):
             TableBlockView(data: tableData)
@@ -446,26 +534,6 @@ private struct BlockView: View {
         case .mathBlock(let mathData):
             MathBlockView(latex: mathData.latex)
         }
-    }
-
-    private func highlightedString(_ original: AttributedString) -> AttributedString {
-        var result = original
-        let originalText = String(original.characters)
-
-        // Apply highlight background to match ranges
-        for range in matchRanges {
-            // Convert String.Index range to AttributedString range
-            let startOffset = originalText.distance(from: originalText.startIndex, to: range.lowerBound)
-            let endOffset = originalText.distance(from: originalText.startIndex, to: range.upperBound)
-
-            let attrStart = result.index(result.startIndex, offsetByCharacters: startOffset)
-            let attrEnd = result.index(result.startIndex, offsetByCharacters: endOffset)
-
-            result[attrStart..<attrEnd].backgroundColor = .yellow
-            result[attrStart..<attrEnd].foregroundColor = .black
-        }
-
-        return result
     }
 }
 

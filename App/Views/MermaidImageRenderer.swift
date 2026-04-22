@@ -19,6 +19,17 @@ actor MermaidImageRenderer {
 
     /// Renders multiple mermaid diagrams, returning a dictionary keyed by source.
     static func renderAll(sources: [String], maxWidth: CGFloat = 500) async -> [String: NSImage] {
+        // Signpost: mermaidRender — single interval covering the sequential render of all
+        // diagrams; metadata records the count up front so the trace shows scale at a glance.
+        let signposter = Signposts.signposter(for: .mermaid)
+        let signpostID = signposter.makeSignpostID()
+        let signpostState = signposter.beginInterval(
+            "mermaidRender",
+            id: signpostID,
+            "diagrams=\(sources.count)"
+        )
+        defer { signposter.endInterval("mermaidRender", signpostState) }
+
         var results: [String: NSImage] = [:]
 
         // Render sequentially to avoid overwhelming the system

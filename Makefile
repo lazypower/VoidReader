@@ -1,7 +1,7 @@
 # VoidReader Makefile
 # Run `make help` for available commands
 
-.PHONY: help project build run run-debug test test-ui test-ui-debug clean format lint xcode setup install dmg dmg-signed staple
+.PHONY: help project build run run-debug test test-ui test-ui-debug clean format lint xcode setup install dmg dmg-signed staple profile
 
 # Default target
 help:
@@ -13,6 +13,10 @@ help:
 	@echo "  make run          - Build and run the app"
 	@echo "  make run-debug    - Run with debug telemetry (VOID_READER_DEBUG=1)"
 	@echo "  make run-debug-file - Run with debug telemetry + file logging"
+	@echo ""
+	@echo "Profiling:"
+	@echo "  make profile      - Build Debug and open Instruments with VoidReader as target"
+	@echo "                      (FILE=path/to/doc.md to auto-open a document at launch)"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test         - Run unit tests"
@@ -86,6 +90,61 @@ run-debug: build
 	@VOID_READER_DEBUG=1 open "$$(xcodebuild -scheme VoidReader -configuration Debug -showBuildSettings | grep -m 1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/VoidReader.app"
 	@echo ""
 	@echo "View logs in Console.app with filter: subsystem:com.voidreader.debug"
+
+# Open Instruments with VoidReader preloaded as the recording target.
+# Usage:
+#   make profile                                   # interactive: pick template in Instruments, hit record
+#   make profile FILE=doc.md                       # auto-launch with a document open (uses xctrace Time Profiler)
+#   make profile FILE=doc.md TIME=15               # headless run capped at 15s wall-clock (recommended for CI/CLI)
+#   make profile FILE=doc.md AUTOSCROLL=fast       # drive a top→bottom scroll pass after 3s delay (DEBUG builds only)
+#   make profile FILE=doc.md AUTOSCROLL=slow       # same, at ~3600 pt/s instead of ~24000 pt/s
+#
+# Signposts emitted by the app appear under "os_signpost" / "Points of Interest"
+# in any template that includes the os_signpost instrument (Time Profiler,
+# Animation Hitches, Allocations, etc.). See DEVELOPMENT.md "Profiling" section
+# for full runbooks. See openspec/changes/add-performance-instrumentation/
+# FINDINGS_p2_signpost_surfacing.md for why categories must be .pointsOfInterest.
+profile: build
+	@APP_PATH="$$(xcodebuild -scheme VoidReader -configuration Debug -showBuildSettings | grep -m 1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/VoidReader.app"; \
+	case "$$APP_PATH" in *Release*) echo "ERROR: resolved path points to Release build: $$APP_PATH"; echo "        purge build/derived and retry"; exit 1 ;; esac; \
+	if [ -n "$(FILE)" ]; then \
+		ABS_FILE="$$(cd "$$(dirname "$(FILE)")" && pwd)/$$(basename "$(FILE)")"; \
+		echo "Profiling with document: $$ABS_FILE"; \
+		echo "  APP_PATH: $$APP_PATH"; \
+		mkdir -p build/traces; \
+		STAMP="$$(date +%Y%m%d-%H%M%S)"; \
+		TRACE_OUT="build/traces/voidreader-$$STAMP.trace"; \
+		DEBUG_LOG="build/traces/voidreader-$$STAMP.debug.log"; \
+		TIME_FLAG=""; \
+		if [ -n "$(TIME)" ]; then TIME_FLAG="--time-limit $(TIME)s"; echo "  time-limit: $(TIME)s"; fi; \
+		AUTOSCROLL_ENV=""; \
+		if [ -n "$(AUTOSCROLL)" ]; then \
+			AUTOSCROLL_ENV="--env VOID_READER_AUTOSCROLL=1 --env VOID_READER_AUTOSCROLL_SPEED=$(AUTOSCROLL)"; \
+			echo "  autoscroll: $(AUTOSCROLL) (app will terminate at bottom)"; \
+		fi; \
+		echo "Recording with Time Profiler template (xctrace headless)..."; \
+		xcrun xctrace record \
+			--template 'Time Profiler' \
+			--instrument os_signpost \
+			$$TIME_FLAG \
+			--env VOID_READER_DEBUG=1 \
+			--env VOID_READER_DEBUG_FILE="$$PWD/$$DEBUG_LOG" \
+			--env VOID_READER_OPEN="$$ABS_FILE" \
+			$$AUTOSCROLL_ENV \
+			--output "$$TRACE_OUT" \
+			--launch -- "$$APP_PATH/Contents/MacOS/VoidReader"; \
+		echo ""; \
+		echo "  Debug log: $$DEBUG_LOG"; \
+		echo ""; \
+		echo "✓ Trace recorded: $$TRACE_OUT"; \
+		echo "  Open with: open $$TRACE_OUT"; \
+	else \
+		echo "Opening Instruments with VoidReader as target..."; \
+		echo "  → Pick a template (Time Profiler, Animation Hitches, Allocations)"; \
+		echo "  → Press Record (⌘R), then drive the app"; \
+		echo "  → Signposts appear under 'os_signpost' / 'Points of Interest'"; \
+		open -a Instruments "$$APP_PATH"; \
+	fi
 
 # Run with debug telemetry and file logging
 run-debug-file: build
