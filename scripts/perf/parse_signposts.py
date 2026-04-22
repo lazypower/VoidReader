@@ -8,19 +8,54 @@ one column; labeled-sweep mode reports one pair of columns per label (e.g.
 10KB / 100KB / 1MB) so callers like `sweep.sh` can render threshold-cliff
 tables without inlining Python.
 
-Interval rows look like:
+## XML Schema (xctrace os-signpost-interval)
+
+xctrace exports interval rows as positional columns matching a `<schema>`
+block at the top of the export. The standard layout is:
+
+    col 0: start-time  (engineering-type: start-time)
+    col 1: duration    (engineering-type: duration)
+    col 2: layout-qualifier
+    col 3: name        (engineering-type: string)
+    col 4: category
+    col 5: subsystem
+    col 6: identifier  (os-signpost-identifier)
+    ...
+
+Each row has one child per column in that order. String-type values are
+interned: a column cell either carries `id="N" fmt="..."` with literal
+text, or `ref="N"` pointing to a prior-defined value. Duration text is
+a raw nanosecond integer (fmt is human-readable like "74.33 µs", ignore).
 
     <row>
-      <sample-time fmt="...">1234567</sample-time>
-      <duration fmt="...">8901234</duration>
-      <os-signpost-name ...>buildHighlighted</os-signpost-name>
+      <start-time id="1" fmt="00:00.860">860944958</start-time>
+      <duration id="2" fmt="74.33 µs">74333</duration>
+      <layout-id id="3" fmt="0">0</layout-id>
+      <string id="4" fmt="Register Property Providers">Register Property Providers</string>
+      <category id="5" fmt="default">default</category>
+      <subsystem id="6" fmt="com.apple.FileURL">com.apple.FileURL</subsystem>
       ...
     </row>
 
-Exports without interval rows (scenario emitted no signposts, or the
-template didn't record them) produce an empty-but-labeled table rather
-than a hard failure — same policy as `run_scenario.sh`'s best-effort
-export.
+Subsystems are heavily Apple-internal (com.apple.FileURL, com.apple.CoreGraphics,
+etc.). We filter to `place.wabash.VoidReader.*` so the table shows only our
+own instrumented intervals. Override via `--subsystem-prefix` if you need
+to surface system signposts for a specific hunt.
+
+## Empty-export policy
+
+Exports without interval rows (scenario emitted no signposts, template didn't
+record them, or trace only captured Apple-internal signposts we filter out)
+produce an empty-but-labeled table rather than a hard failure — same policy
+as `run_scenario.sh`'s best-effort export.
+
+## Capture template note
+
+`run_scenario.sh` passes `--instrument os_signpost` on top of
+`--template "Time Profiler"`. Time Profiler alone does NOT capture signposts;
+the `--instrument os_signpost` flag is load-bearing. See
+openspec/changes/add-performance-instrumentation/FINDINGS_p2_signpost_surfacing.md
+for the full diagnosis of how this was originally missed.
 
 Export one from an Instruments trace:
     xctrace export --input foo.trace \
@@ -30,6 +65,9 @@ Export one from an Instruments trace:
 Usage:
     # Single-trace table
     parse_signposts.py signposts.xml
+
+    # Include Apple-system signposts too
+    parse_signposts.py signposts.xml --subsystem-prefix ""
 
     # Sweep table — repeat --labeled per size
     parse_signposts.py \
@@ -56,55 +94,155 @@ from pathlib import Path
 # XML extraction
 # ---------------------------------------------------------------------------
 
-def extract_intervals(xml_path: str) -> dict[str, list[int]]:
+# Default subsystem prefix filter — suppresses Apple-internal signposts
+# (com.apple.FileURL, com.apple.CoreGraphics, etc.). Override via
+# `--subsystem-prefix ""` to surface all subsystems, or a custom value to
+# hunt in a specific one.
+DEFAULT_SUBSYSTEM_PREFIX = "place.wabash.VoidReader"
+
+
+def _read_schema_columns(root: ET.Element) -> list[str]:
+    """Return column mnemonics in order (e.g., ['start', 'duration', ..., 'name', 'category', 'subsystem']).
+
+    Falls back to the documented standard layout if the schema block is
+    missing or malformed — newer xctrace versions have kept this stable,
+    but the fallback means a partial/truncated export still parses.
+    """
+    schema = root.find(".//schema[@name='os-signpost-interval']")
+    if schema is not None:
+        cols = []
+        for col in schema.findall("col"):
+            mn = col.find("mnemonic")
+            cols.append(mn.text if mn is not None and mn.text else "")
+        if cols:
+            return cols
+    # Documented standard layout — covers all columns parse_signposts cares
+    # about (duration@1, name@3, subsystem@5).
+    return [
+        "start", "duration", "layout-qualifier", "name",
+        "category", "subsystem", "identifier",
+        "process", "end-process", "start-thread", "end-thread",
+        "start-message", "end-message",
+        "start-backtrace", "end-backtrace",
+        "start-emit-location", "end-emit-location",
+        "signature",
+    ]
+
+
+def _build_intern_map(root: ET.Element) -> tuple[dict[str, str], dict[str, str]]:
+    """Walk the tree and collect id→fmt (display strings) and id→text (raw values).
+
+    xctrace interns repeated values — a cell carries either id+value or a
+    bare `ref="N"`. We need both maps because:
+    - string-type columns (name, subsystem, category) want the fmt/display
+    - duration column wants the raw text (nanosecond integer)
+    """
+    id_fmt: dict[str, str] = {}
+    id_text: dict[str, str] = {}
+    for elem in root.iter():
+        eid = elem.get("id")
+        if eid is None:
+            continue
+        fmt = elem.get("fmt")
+        if fmt:
+            id_fmt[eid] = fmt
+        if elem.text:
+            stripped = elem.text.strip()
+            if stripped:
+                id_text[eid] = stripped
+    return id_fmt, id_text
+
+
+def _resolve_display(elem: ET.Element, id_fmt: dict[str, str], id_text: dict[str, str]) -> str | None:
+    """Prefer `fmt`, fall back to text; resolve refs through both maps."""
+    if elem is None:
+        return None
+    ref = elem.get("ref")
+    if ref is not None:
+        return id_fmt.get(ref) or id_text.get(ref)
+    fmt = elem.get("fmt")
+    if fmt:
+        return fmt
+    if elem.text:
+        stripped = elem.text.strip()
+        return stripped or None
+    return None
+
+
+def _resolve_int(elem: ET.Element, id_text: dict[str, str]) -> int | None:
+    """Integer from text content, resolving refs. Ignores `fmt` (it's human display)."""
+    if elem is None:
+        return None
+    ref = elem.get("ref")
+    if ref is not None:
+        raw = id_text.get(ref)
+    else:
+        raw = elem.text.strip() if elem.text else None
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+def extract_intervals(
+    xml_path: str,
+    subsystem_prefix: str = DEFAULT_SUBSYSTEM_PREFIX,
+) -> dict[str, list[int]]:
     """Return {signpost_name: [duration_ns, ...]} for an intervals export.
+
+    Filters to rows whose subsystem starts with `subsystem_prefix` (default:
+    `place.wabash.VoidReader`). Pass `""` to include all subsystems.
 
     Tolerates:
     - missing file (returns {})
-    - empty file (returns {})
-    - rows without name or duration (skipped)
-    - malformed duration values (skipped)
+    - empty / root-only exports (returns {})
+    - rows with missing cells or malformed values (skipped per-row)
+    - schema block absent (falls back to documented standard column layout)
     """
     path = Path(xml_path)
     if not path.exists() or path.stat().st_size == 0:
         return {}
 
-    # Streamed parse keeps memory flat for long traces.
-    by_name: dict[str, list[int]] = defaultdict(list)
-    name_by_id: dict[str, str] = {}
-
     try:
-        for event, elem in ET.iterparse(xml_path, events=("end",)):
-            if elem.tag != "row":
-                continue
-
-            # os-signpost-name may be inline (has text) or a ref to a prior
-            # inline definition. xctrace interns repeated string values.
-            name_el = elem.find(".//os-signpost-name")
-            name: str | None = None
-            if name_el is not None:
-                nid = name_el.get("id")
-                nref = name_el.get("ref")
-                if name_el.text:
-                    name = name_el.text.strip() or None
-                    if nid and name:
-                        name_by_id[nid] = name
-                elif nref:
-                    name = name_by_id.get(nref)
-
-            dur_el = elem.find(".//duration")
-            if name and dur_el is not None and dur_el.text:
-                try:
-                    by_name[name].append(int(dur_el.text))
-                except ValueError:
-                    pass
-
-            elem.clear()
+        tree = ET.parse(xml_path)
     except ET.ParseError as e:
-        # Empty-ish exports (only a root tag) read cleanly; real parse errors
-        # print to stderr so callers see them in the xctrace log.
         print(f"# parse error {xml_path}: {e}", file=sys.stderr)
         return {}
+
+    root = tree.getroot()
+    cols = _read_schema_columns(root)
+
+    # Locate the three columns we care about. If any is missing from the
+    # schema (unexpected xctrace version), bail with empty rather than mis-index.
+    try:
+        duration_idx = cols.index("duration")
+        name_idx = cols.index("name")
+        subsystem_idx = cols.index("subsystem")
+    except ValueError:
+        print(f"# unexpected schema in {xml_path}: cols={cols}", file=sys.stderr)
+        return {}
+
+    id_fmt, id_text = _build_intern_map(root)
+    by_name: dict[str, list[int]] = defaultdict(list)
+
+    # Rows live under <node>/<row>; iterate all rows regardless of node depth.
+    for row in root.iter("row"):
+        cells = list(row)
+        if len(cells) <= max(duration_idx, name_idx, subsystem_idx):
+            continue
+
+        subsystem = _resolve_display(cells[subsystem_idx], id_fmt, id_text)
+        if subsystem_prefix and (not subsystem or not subsystem.startswith(subsystem_prefix)):
+            continue
+
+        name = _resolve_display(cells[name_idx], id_fmt, id_text)
+        duration = _resolve_int(cells[duration_idx], id_text)
+        if not name or duration is None:
+            continue
+
+        by_name[name].append(duration)
 
     return dict(by_name)
 
@@ -145,8 +283,8 @@ def fmt_delta(current: int | None, baseline: int | None) -> str:
 # Output modes
 # ---------------------------------------------------------------------------
 
-def render_single(path: str) -> str:
-    by_name = extract_intervals(path)
+def render_single(path: str, subsystem_prefix: str = DEFAULT_SUBSYSTEM_PREFIX) -> str:
+    by_name = extract_intervals(path, subsystem_prefix=subsystem_prefix)
     lines = [
         "| Signpost | count | p50 | p95 |",
         "|---|---|---|---|",
@@ -164,11 +302,13 @@ def render_single(path: str) -> str:
 
 
 def render_sweep(labeled: list[tuple[str, str]],
-                 baseline_data: dict[str, dict[str, int]] | None) -> tuple[str, dict]:
+                 baseline_data: dict[str, dict[str, int]] | None,
+                 subsystem_prefix: str = DEFAULT_SUBSYSTEM_PREFIX) -> tuple[str, dict]:
     """Render a sweep table. Returns (markdown, machine_readable_snapshot)."""
     # label -> {name: [durations]}
     per_label: dict[str, dict[str, list[int]]] = {
-        label: extract_intervals(path) for label, path in labeled
+        label: extract_intervals(path, subsystem_prefix=subsystem_prefix)
+        for label, path in labeled
     }
     labels = [lbl for lbl, _ in labeled]
 
@@ -273,6 +413,16 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Write {name: {label: p50_ns}} JSON alongside the table (sweep mode).",
     )
+    p.add_argument(
+        "--subsystem-prefix",
+        default=DEFAULT_SUBSYSTEM_PREFIX,
+        metavar="PREFIX",
+        help=(
+            "Filter to rows whose subsystem starts with PREFIX "
+            f"(default: {DEFAULT_SUBSYSTEM_PREFIX!r}). Pass '' to include all "
+            "subsystems including Apple-internal signposts."
+        ),
+    )
     return p
 
 
@@ -289,7 +439,7 @@ def main(argv: list[str] | None = None) -> int:
             print("error: --baseline / --emit-snapshot only meaningful with --labeled",
                   file=sys.stderr)
             return 2
-        print(render_single(args.xml_path))
+        print(render_single(args.xml_path, subsystem_prefix=args.subsystem_prefix))
         return 0
 
     if not args.labeled:
@@ -297,7 +447,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     baseline_data = load_baseline(args.baseline) if args.baseline else None
-    table, snapshot = render_sweep(args.labeled, baseline_data)
+    table, snapshot = render_sweep(args.labeled, baseline_data,
+                                   subsystem_prefix=args.subsystem_prefix)
     print(table)
 
     if args.emit_snapshot:

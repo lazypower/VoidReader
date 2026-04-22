@@ -146,6 +146,7 @@ sleep 1
 set +e
 xctrace record \
     --template "Time Profiler" \
+    --instrument os_signpost \
     --output "$TRACE_PATH" \
     --time-limit "${DURATION}s" \
     --target-stdout - \

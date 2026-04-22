@@ -7,13 +7,16 @@ narrates the workflow.
 
 ## Files
 
-| File                    | Role                                                    |
-|-------------------------|---------------------------------------------------------|
-| `parse_trace.py`        | xctrace XML → hot-signature report (interpretation).    |
-| `test_parse_trace.py`   | Unit coverage against the committed XML fixture.        |
-| `run_scenario.sh`       | Named scenario capture: xctrace record + parse handoff. |
-| `sweep.sh`              | Size-sweep harness for threshold-cliff findings.        |
-| `findings_template.md`  | Required structure for arc findings docs.               |
+| File                       | Role                                                           |
+|----------------------------|----------------------------------------------------------------|
+| `parse_trace.py`           | time-profile XML → hot-signature report (interpretation).      |
+| `parse_signposts.py`       | os-signpost-interval XML → p50/p95 tables + baseline deltas.   |
+| `test_parse_trace.py`      | Unit coverage against the committed XML fixture.               |
+| `test_parse_signposts.py`  | Unit coverage with schema-accurate synthetic XML.              |
+| `generate_fixtures.py`     | Deterministic test-fixture generator for the size-sweep matrix.|
+| `run_scenario.sh`          | Named scenario capture: xctrace record + parse handoff.        |
+| `sweep.sh`                 | Size-sweep harness for threshold-cliff findings.               |
+| `findings_template.md`     | Required structure for arc findings docs.                      |
 
 ## Orchestration vs interpretation — hard boundary
 
@@ -45,10 +48,18 @@ scripts/perf/run_scenario.sh search-navigate
 scripts/perf/run_scenario.sh open-large --fixture path/to/doc.md --duration 60
 ```
 
-Outputs land in `build/traces/<scenario>-<timestamp>.trace` + `.xml`.
+Outputs land in `build/traces/<scenario>-<timestamp>.{trace,xml,signposts.xml}`.
 `build/traces/` is fully gitignored — raw traces never land in the repo.
 Retention happens via Gitea build artifacts uploaded by `.gitea/workflows/
 test-perf-lab.yml` (default 90 days, extensible).
+
+`run_scenario.sh` passes `--template "Time Profiler" --instrument os_signpost`
+to `xctrace record`. **Both flags are load-bearing**: Time Profiler captures
+stack samples, and `--instrument os_signpost` captures the interval data that
+`parse_signposts.py` consumes. If you drop the instrument flag, signpost
+exports come back empty. See
+[`openspec/changes/add-performance-instrumentation/FINDINGS_p2_signpost_surfacing.md`](../../openspec/changes/add-performance-instrumentation/FINDINGS_p2_signpost_surfacing.md)
+for the full diagnosis from when this was originally missed.
 
 ## Parsing a trace
 
@@ -71,16 +82,53 @@ at the top of `parse_trace.py`. Edit in-file and commit — they're small
 enough to maintain by hand, and catching new idle/app patterns as they
 surface is preferable to an external config file.
 
+## Parsing signposts
+
+```bash
+# Single-trace p50/p95 table (VoidReader signposts only)
+scripts/perf/parse_signposts.py build/traces/foo.signposts.xml
+
+# Include Apple-system signposts (Commit, SLSTransaction, etc.)
+scripts/perf/parse_signposts.py build/traces/foo.signposts.xml --subsystem-prefix ""
+
+# Filter to a specific subsystem
+scripts/perf/parse_signposts.py build/traces/foo.signposts.xml \
+    --subsystem-prefix place.wabash.VoidReader.rendering
+
+# Sweep mode — one column group per label, optional baseline delta
+scripts/perf/parse_signposts.py \
+    --labeled 10KB:build/traces/search-navigate-10KB.signposts.xml \
+    --labeled 100KB:build/traces/search-navigate-100KB.signposts.xml \
+    --labeled 1MB:build/traces/search-navigate-1MB.signposts.xml \
+    --emit-snapshot findings/today.snapshot.json \
+    --baseline findings/prior.snapshot.json
+```
+
+`sweep.sh` calls `parse_signposts.py` under the hood to render the p50/p95
+table per size; delta columns light up when you pass `--baseline` pointing
+at a prior `--emit-snapshot` output.
+
+Default filter is `place.wabash.VoidReader.*` — the three subsystems our
+Swift code emits into (`.lifecycle`, `.rendering`, with `.scroll`, `.mermaid`,
+and `.image` also defined). Override with `--subsystem-prefix` when you want
+to include Apple-internal signposts or focus on a single subsystem.
+
 ## Unit coverage
 
 ```bash
-python3 -m unittest scripts.perf.test_parse_trace -v
+python3 -m unittest \
+    scripts.perf.test_parse_trace \
+    scripts.perf.test_parse_signposts \
+    -v
 ```
 
-Tests run against `Tests/VoidReaderCoreTests/Fixtures/traces/
+`test_parse_trace` runs against `Tests/VoidReaderCoreTests/Fixtures/traces/
 search_navigate_fixture.xml` — a synthetic kilobyte-scale XML that
 exercises main-TID auto-detection, idle classification, and each output
-mode. Deterministic; no xctrace dependency.
+mode. `test_parse_signposts` uses schema-accurate synthetic XML built in
+`tempfile` to cover the positional-column layout, interned `id`/`ref`
+pairs, subsystem filtering, and render modes (single, sweep, baseline).
+Both are deterministic; no xctrace dependency.
 
 ## JSON output (deferred)
 

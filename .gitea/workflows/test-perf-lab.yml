@@ -33,11 +33,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run parse_trace.py unit tests
+      - name: Run parser unit tests
         run: |
-          python3 -m unittest scripts.perf.test_parse_trace -v
+          python3 -m unittest \
+            scripts.perf.test_parse_trace \
+            scripts.perf.test_parse_signposts \
+            -v
 
-      - name: Smoke-test parser against committed fixture
+      - name: Smoke-test parse_trace against committed fixture
         run: |
           python3 scripts/perf/parse_trace.py \
             Tests/VoidReaderCoreTests/Fixtures/traces/search_navigate_fixture.xml \
