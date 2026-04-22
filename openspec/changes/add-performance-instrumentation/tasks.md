@@ -49,6 +49,18 @@
 - [ ] 4.3 Confirm `MarkdownPerformanceTests` suite passes unchanged
 - [ ] 4.4 Release gate check: Phase A complete and app profiled-and-tuned → 1.1.0 can tag
 
+### 4b. Signposts Requested by `add-performance-lab`
+
+The performance lab needs per-path signposts for the search-navigate and
+large-document arcs. These are filed here because they belong to the
+instrumentation change's scope; the lab *consumes* what this change produces.
+
+- [ ] 4b.1 Wrap `MarkdownReaderViewWithAnchors.computeMatchInfo(blocks:)` with `computeMatchInfo` interval; attach metadata (block count, match count)
+- [ ] 4b.2 Wrap `TextSearcher.buildHighlighted` (or current highlighted-string construction site) with `buildHighlighted` interval; attach metadata (input chars, match count)
+- [ ] 4b.3 Wrap `ContentView.updateRenderedBlocks(from:)` with `updateRenderedBlocks` interval; attach metadata (block count, chunker-triggered flag). Distinct from the existing `renderBatch` interval which lives inside this function.
+- [ ] 4b.4 Wrap `CodeBlockView.highlightedString` (background highlight path) with `highlightedString` interval; attach metadata (chars, language, cache-hit flag)
+- [ ] 4b.5 Cross-link each new signpost in `PERFORMANCE.md` once live (replace the "missing" annotation)
+
 ## Phase B — CI Regression Gating
 
 ### 5. xctrace Research Spike

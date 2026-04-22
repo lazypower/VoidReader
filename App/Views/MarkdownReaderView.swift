@@ -13,6 +13,9 @@ struct MarkdownReaderView: View {
     var onMermaidExpand: ((String) -> Void)?
 
     var body: some View {
+        #if DEBUG
+        let _ = InvalidationCounter.tick("MarkdownReaderView")
+        #endif
         // Use provided blocks or render if empty (fallback for previews)
         let renderBlocks = blocks.isEmpty ? BlockRenderer.render(text) : blocks
 
@@ -511,6 +514,9 @@ private struct BlockView: View {
     var onMermaidExpand: ((String) -> Void)?
 
     var body: some View {
+        #if DEBUG
+        let _ = InvalidationCounter.tick("BlockView")
+        #endif
         switch block {
         case .text(let attributedString):
             Text(highlighted ?? attributedString)
