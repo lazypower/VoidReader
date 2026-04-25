@@ -707,6 +707,10 @@ struct ContentView: View {
     /// On completion (including cache-hit fast path), each measurement is
     /// also recorded into `documentHeightIndex` at the block's index so
     /// the prefix-sum totalHeight converges to the authoritative value.
+    /// The recorded height includes the view-layer chrome (padding +
+    /// header) that `CodeBlockView` applies around the raw TextKit
+    /// measurement, matching what `DocumentHeightIndex.defaultFallback`
+    /// already accounts for in its estimate.
     private func prefetchCodeBlockMeasurements() {
         let fontFamily = resolvedCodeFontFamily
         let fontSize = CGFloat(readerFontSize * 0.875)
@@ -726,6 +730,14 @@ struct ContentView: View {
             guard case .codeBlock(let data) = block,
                   data.originalBlockSize > CodeBlockView.maxSwiftUITextChars else { continue }
 
+            // Compute the view-layer chrome that CodeBlockView adds around
+            // the raw TextKit measurement. Must match defaultFallback's
+            // chrome calculation so totalHeight doesn't jump when the
+            // authoritative measurement replaces the line-count estimate.
+            var chrome: CGFloat = 0
+            if data.isSegmentFirst { chrome += 12 + 24 }  // codeTopPadding + header
+            if data.isSegmentLast { chrome += 12 }          // codeBottomPadding
+
             CodeBlockMeasurementScheduler.enqueueIfNeeded(
                 code: data.code,
                 language: data.language,
@@ -734,10 +746,10 @@ struct ContentView: View {
                 themeName: themeName,
                 cache: cache
             ) { _, result in
-                // Feed the authoritative height into the document-wide
-                // index so totalHeight stops under-reporting as rows
-                // outside the materialized window land their measurements.
-                heightIndex.recordHeight(result.height, at: index)
+                // Feed the authoritative height (text + chrome) into the
+                // document-wide index so totalHeight stays accurate as
+                // measurements replace fallback estimates.
+                heightIndex.recordHeight(result.height + chrome, at: index)
             }
         }
     }
@@ -1275,6 +1287,11 @@ struct ContentView: View {
     /// when `LazyVStack` hasn't materialized later rows, which was causing
     /// the scroll % to saturate at 100% partway through large docs
     /// (symptom: "jumps from 52% to 100% as I scroll down").
+    ///
+    /// `outerChrome` accounts for non-block height in the scroll
+    /// container: the reader's outer padding and the 1pt top anchor.
+    /// Without it, totalHeight is ~81pt less than actual content height,
+    /// and the percentage saturates early on every document.
     private func updateScrollPercent(offset: CGFloat) {
         // Store offset for later recalculation when dimensions change
         scrollOffsetForPercent = offset
@@ -1282,9 +1299,16 @@ struct ContentView: View {
         // Skip if in edit mode
         guard !isEditMode else { return }
 
+        // The height index tracks block heights + inter-block spacing.
+        // The reader view wraps content in outer padding + a 1pt anchor
+        // that aren't tracked by the index.
+        let outerPadding = (fullWidthReader ? CGFloat(24) : CGFloat(40)) * 2
+        let outerChrome = outerPadding + 1
+
         let fraction = documentHeightIndex.scrollFraction(
             offset: offset,
-            visibleHeight: visibleHeight
+            visibleHeight: visibleHeight,
+            outerChrome: outerChrome
         )
         let percent = Int((fraction * 100).rounded())
 

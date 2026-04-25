@@ -156,14 +156,28 @@ final class DocumentHeightIndex: ObservableObject {
     /// range), matching NSScrollView's own convention: at scroll 0 the
     /// user sees the top, at scrollable-max they see the bottom. If the
     /// document fits the viewport, scroll % is 0 by definition.
-    func scrollFraction(offset: CGFloat, visibleHeight: CGFloat) -> Double {
-        let scrollable = max(totalHeight - visibleHeight, 1)
-        guard totalHeight > visibleHeight else { return 0 }
+    ///
+    /// `outerChrome` accounts for non-block height in the scroll
+    /// container that the index doesn't track — e.g. padding around the
+    /// reader view, anchor spacers, etc. Added to `totalHeight` so the
+    /// denominator matches the real scrollable range.
+    func scrollFraction(offset: CGFloat, visibleHeight: CGFloat, outerChrome: CGFloat = 0) -> Double {
+        let effective = totalHeight + outerChrome
+        let scrollable = max(effective - visibleHeight, 1)
+        guard effective > visibleHeight else { return 0 }
         let raw = Double(offset / scrollable)
         return min(max(raw, 0), 1)
     }
 
     // MARK: - Rebuild
+
+    /// Force a synchronous rebuild. Exposed for unit tests that record
+    /// heights and need to inspect `totalHeight` immediately without
+    /// waiting for the debounced `Task` to run.
+    func flushForTesting() {
+        rebuildNow()
+        pendingRebuild = false
+    }
 
     private func scheduleRebuild() {
         guard !pendingRebuild else { return }
