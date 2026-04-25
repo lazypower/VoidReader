@@ -195,5 +195,70 @@ struct DocumentHeightIndexTests {
             )
         }
     }
+
+    // MARK: - Progressive render regression
+
+    @Test("Reconfigure with more blocks increases totalHeight and reduces scrollFraction")
+    @MainActor func progressiveRenderReconfigure() {
+        // Simulates the progressive render bug:
+        // 1. Initial chunk: 3 blocks, small totalHeight
+        // 2. User is near bottom → scrollFraction ≈ 1.0
+        // 3. Background render completes: 200 blocks, large totalHeight
+        // 4. Same offset → scrollFraction should drop dramatically
+        //
+        // The actual bug was that step 4 never happened because
+        // updateScrollPercent wasn't called after reconfigure.
+        let index = DocumentHeightIndex()
+        let visibleHeight: CGFloat = 375
+        let outerChrome: CGFloat = 81
+
+        // Step 1: initial chunk (3 blocks, ~442pt like the debug log showed)
+        index.configure(blockCount: 3, blockSpacing: 16, fallback: { _ in 140 })
+        let initialTotal = index.totalHeight
+        #expect(initialTotal < 500, "Initial chunk should be small")
+
+        // Step 2: user scrolls a tiny bit — with only 3 blocks, this is near 100%
+        let offset: CGFloat = 144
+        let initialFraction = index.scrollFraction(
+            offset: offset,
+            visibleHeight: visibleHeight,
+            outerChrome: outerChrome
+        )
+        #expect(initialFraction > 0.9, "With 3 blocks, offset 144 should read ~100% (got \(initialFraction))")
+
+        // Step 3: background render completes, reconfigure with full document
+        index.configure(blockCount: 200, blockSpacing: 16, fallback: { _ in 140 })
+        let fullTotal = index.totalHeight
+        #expect(fullTotal > initialTotal * 10, "Full document should be much taller")
+
+        // Step 4: SAME offset, but now with correct denominator
+        let updatedFraction = index.scrollFraction(
+            offset: offset,
+            visibleHeight: visibleHeight,
+            outerChrome: outerChrome
+        )
+        #expect(
+            updatedFraction < 0.05,
+            "After reconfigure, offset 144 in a huge doc should be near 0% (got \(updatedFraction))"
+        )
+    }
+
+    @Test("scrollFraction returns 0 when totalHeight is 0 (no blocks yet)")
+    @MainActor func zeroBlocksReturnsZero() {
+        // Before any blocks are rendered, totalHeight is 0.
+        // scrollFraction must return 0, not NaN or 100%.
+        let index = DocumentHeightIndex()
+        let fraction = index.scrollFraction(offset: 0, visibleHeight: 600)
+        #expect(fraction == 0, "Empty index should return 0% (got \(fraction))")
+    }
+
+    @Test("scrollFraction returns 0 when visibleHeight not yet measured")
+    @MainActor func zeroVisibleHeightReturnsZero() {
+        // On first layout pass, visibleHeight may still be 0.
+        let index = DocumentHeightIndex()
+        index.configure(blockCount: 10, blockSpacing: 16, fallback: { _ in 200 })
+        let fraction = index.scrollFraction(offset: 0, visibleHeight: 0, outerChrome: 81)
+        #expect(fraction == 0, "With visibleHeight=0 at offset 0, should return 0% (got \(fraction))")
+    }
 }
 #endif

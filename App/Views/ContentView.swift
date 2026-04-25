@@ -810,6 +810,11 @@ struct ContentView: View {
                 BlockSpacing.topSpacing(at: index, in: snapshot)
             }
         )
+        // The height denominator just changed — recalculate scroll percent
+        // at the current offset. Without this, progressive rendering leaves
+        // the percentage stuck at the value computed against the initial
+        // (partial) block list.
+        updateScrollPercent(offset: scrollOffsetForPercent)
     }
 
     private func scrollToHeading(_ heading: HeadingInfo) {
