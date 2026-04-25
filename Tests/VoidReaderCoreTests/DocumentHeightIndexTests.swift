@@ -1,8 +1,11 @@
 import Testing
 import CoreGraphics
+#if canImport(VoidReader)
 @testable import VoidReader
+#endif
 @testable import VoidReaderCore
 
+#if canImport(VoidReader)
 @Suite("DocumentHeightIndex Scroll Fraction")
 struct DocumentHeightIndexTests {
 
@@ -193,3 +196,4 @@ struct DocumentHeightIndexTests {
         }
     }
 }
+#endif
