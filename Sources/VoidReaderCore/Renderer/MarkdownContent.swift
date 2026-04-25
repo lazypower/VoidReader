@@ -11,6 +11,7 @@ public enum MarkdownBlock: Identifiable {
     case image(ImageData)
     case mermaid(MermaidData)
     case mathBlock(MathData)
+    case frontmatter(FrontmatterData)
 
     public var id: String {
         switch self {
@@ -28,6 +29,8 @@ public enum MarkdownBlock: Identifiable {
             return "mermaid-\(data.id)"
         case .mathBlock(let data):
             return "math-\(data.id)"
+        case .frontmatter(let data):
+            return "frontmatter-\(data.id)"
         }
     }
 }

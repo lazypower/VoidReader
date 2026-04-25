@@ -179,6 +179,23 @@ final class PrintableMarkdownView: NSView {
                 type: .mathPlaceholder(data.latex),
                 frame: NSRect(x: xOffset, y: yOffset, width: contentWidth, height: 32)
             )
+
+        case .frontmatter(let fmData):
+            // For print, render frontmatter as simple key: value text
+            let lines = fmData.fields.map { "\($0.key): \($0.value)" }.joined(separator: "\n")
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 10),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]
+            let nsAttr = NSAttributedString(string: lines, attributes: attrs)
+            let textHeight = nsAttr.boundingRect(
+                with: NSSize(width: contentWidth, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin]
+            ).height + 16
+            return RenderedBlock(
+                type: .text(nsAttr),
+                frame: NSRect(x: xOffset, y: yOffset, width: contentWidth, height: textHeight)
+            )
         }
     }
 

@@ -11,7 +11,8 @@ public final class BlockHeightCache: ObservableObject {
         .taskList: 120,      // Few task items
         .image: 300,         // Placeholder for images
         .mermaid: 400,       // Diagram placeholder
-        .mathBlock: 120      // Math equation
+        .mathBlock: 120,     // Math equation
+        .frontmatter: 80     // Frontmatter banner
     ]
 
     /// Block type classification for height estimation
@@ -23,6 +24,7 @@ public final class BlockHeightCache: ObservableObject {
         case image
         case mermaid
         case mathBlock
+        case frontmatter
     }
 
     /// Type-based estimates (can be tuned)
@@ -101,6 +103,7 @@ extension MarkdownBlock {
         case .image: return .image
         case .mermaid: return .mermaid
         case .mathBlock: return .mathBlock
+        case .frontmatter: return .frontmatter
         }
     }
 
