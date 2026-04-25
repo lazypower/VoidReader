@@ -17,4 +17,5 @@ jobs:
           scheme: VoidReader
           only-testing: |
             VoidReaderUITests/LargeDocumentTests
+            VoidReaderUITests/ScrollPercentageUITests
           result-bundle-path: TestResults/ui.xcresult
