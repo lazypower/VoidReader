@@ -77,12 +77,21 @@ public struct BlockRenderer {
         )
 
         let allBlocks: [MarkdownBlock] = DebugLog.measure(.rendering, "BlockRenderer.render(\(charCount) chars)") {
+            // Extract frontmatter before any other processing
+            let fmResult = FrontmatterParser.parse(text)
+            let bodyText = fmResult.body
+
             // Pre-process to extract math blocks ($$...$$)
             let segments = DebugLog.measure(.rendering, "  extractMathBlocks") {
-                extractMathBlocks(from: text)
+                extractMathBlocks(from: bodyText)
             }
 
             var blocks: [MarkdownBlock] = []
+
+            // Prepend frontmatter block if present
+            if let fm = fmResult.frontmatter {
+                blocks.append(.frontmatter(fm))
+            }
 
             for segment in segments {
                 switch segment {

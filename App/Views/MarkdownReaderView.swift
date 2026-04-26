@@ -59,6 +59,9 @@ struct MarkdownReaderView: View {
 
         case .mathBlock(let mathData):
             MathBlockView(latex: mathData.latex)
+
+        case .frontmatter(let fmData):
+            FrontmatterBannerView(data: fmData)
         }
     }
 }
@@ -539,6 +542,9 @@ private struct BlockView: View {
 
         case .mathBlock(let mathData):
             MathBlockView(latex: mathData.latex)
+
+        case .frontmatter(let fmData):
+            FrontmatterBannerView(data: fmData)
         }
     }
 }

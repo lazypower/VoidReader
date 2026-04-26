@@ -138,6 +138,22 @@ private struct QuickLookBlockView: View {
                     .background(Color(nsColor: .controlBackgroundColor))
                     .cornerRadius(6)
             }
+
+        case .frontmatter(let fmData):
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(fmData.fields.enumerated()), id: \.offset) { _, field in
+                    HStack(spacing: 4) {
+                        Text(field.key + ":")
+                            .foregroundColor(.secondary)
+                        Text(field.value)
+                    }
+                    .font(.system(size: 11))
+                }
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .cornerRadius(6)
         }
     }
 }

@@ -10,11 +10,95 @@ jobs:
       - uses: actions/swift-ci-actions/require-gui-session@v1
       - uses: actions/checkout@v4
       - uses: actions/swift-ci-actions/setup-swift-project@v1
+
+      - name: Generate test fixtures
+        run: |
+          mkdir -p TestDocuments
+
+          # 50K-row table
+          echo '| Row | Col A | Col B | Col C |' > TestDocuments/torture_50k_table.md
+          echo '|-----|-------|-------|-------|' >> TestDocuments/torture_50k_table.md
+          for i in $(seq 1 50000); do echo "| $i | data_a_$i | data_b_$i | data_c_$i |"; done >> TestDocuments/torture_50k_table.md
+
+          # 100K-line code block
+          echo '```swift' > TestDocuments/torture_100k_code.md
+          for i in $(seq 1 100000); do echo "line $i: func process(data: [Int]) -> [Int] { return data.map { \$0 * 2 }.filter { \$0 > 10 } }"; done >> TestDocuments/torture_100k_code.md
+          echo '```' >> TestDocuments/torture_100k_code.md
+
+          # Mixed content for scroll interaction test
+          cat > TestDocuments/mixed-content-scroll.md << 'FIXTURE'
+          # Mixed Content Scroll Test
+
+          This document tests scroll percentage with varied block heights.
+
+          ## Text Section
+
+          Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod
+          tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam.
+
+          Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore
+          eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident.
+
+          ## Code Block
+
+          ```swift
+          struct ScrollTracker {
+              var offset: CGFloat = 0
+              var visibleHeight: CGFloat = 0
+              var totalHeight: CGFloat = 0
+
+              var percentage: Int {
+                  guard totalHeight > visibleHeight else { return 0 }
+                  let scrollable = totalHeight - visibleHeight
+                  return Int((offset / scrollable * 100).rounded())
+              }
+          }
+          ```
+
+          ## Table
+
+          | Feature | Status | Priority |
+          |---------|--------|----------|
+          | Frontmatter | Done | High |
+          | Scroll % | Done | High |
+          | Mermaid | Done | Medium |
+          | Math | Partial | Low |
+
+          ## More Text
+
+          Paragraph after the table to add more scrollable content. This ensures the
+          document is long enough that scroll percentage actually changes when scrolling.
+
+          Another paragraph with enough content to push the document height beyond a
+          single viewport. The scroll percentage UI tests need documents that are taller
+          than the visible area to produce meaningful results.
+
+          ## Task List
+
+          - [x] Parse frontmatter
+          - [x] Render banner
+          - [x] Fix scroll percentage
+          - [ ] Ship it
+
+          ## Final Section
+
+          End of the mixed content test document. If scroll percentage shows 100% here
+          and 0% at the top, the feature is working correctly.
+          FIXTURE
+
+          ls -lh TestDocuments/
+
       - name: Kill stale VoidReader instances
         run: killall VoidReader || true
+
       - uses: actions/swift-ci-actions/xcode-test@v1
         with:
           scheme: VoidReader
           only-testing: |
             VoidReaderUITests/LargeDocumentTests
+            VoidReaderUITests/ScrollPercentageUITests
           result-bundle-path: TestResults/ui.xcresult
+
+      - name: Clean up test fixtures
+        if: always()
+        run: rm -rf TestDocuments/
