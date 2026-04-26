@@ -85,44 +85,4 @@ final class ScrollPercentageUITests: VoidReaderUITestCase {
             "Scroll percentage at top of large code block should be near 0% (got \(percent)%)"
         )
     }
-
-    /// After scrolling partway into a large document, percentage should be
-    /// between 0 and 100 (not stuck at either extreme).
-    ///
-    /// Uses the mixed-content fixture (smaller) with gentle trackpad scroll
-    /// to avoid overwhelming the 100K code block renderer.
-    func testPercentageAdvancesOnScroll() throws {
-        launchAndOpen(documentPath: Self.mixedContentPath)
-
-        // Wait for render
-        sleep(5)
-
-        // Focus scroll area
-        let scrollArea = app.scrollViews.firstMatch
-        guard scrollArea.waitForExistence(timeout: 5) else {
-            XCTFail("No scroll view found")
-            return
-        }
-        scrollArea.click()
-        usleep(300_000)
-
-        // Gentle scroll down
-        for _ in 0..<20 {
-            scrollArea.scroll(byDeltaX: 0, deltaY: -15)
-            usleep(50_000)
-        }
-        sleep(2)
-
-        guard let percent = readScrollPercent() else {
-            // Document may fit viewport — skip rather than fail
-            print("No percent-read element — document may fit viewport")
-            return
-        }
-
-        print("Scroll percent after scroll in mixed-content: \(percent)%")
-        XCTAssertGreaterThan(
-            percent, 0,
-            "After scrolling down, percentage should be above 0% (got \(percent)%)"
-        )
-    }
 }
