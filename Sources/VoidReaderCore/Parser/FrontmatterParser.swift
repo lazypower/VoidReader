@@ -27,9 +27,10 @@ public struct FrontmatterParser {
 
     /// Parse frontmatter from markdown text.
     ///
-    /// Expects the document to start with `---` on the first line, followed by
-    /// simple `key: value` YAML lines, closed by another `---`. Anything before
-    /// the opening fence or after the closing fence is treated as body text.
+    /// Expects the document to start with `---` on the very first line (no
+    /// leading blank lines or preamble), followed by simple `key: value` YAML
+    /// lines, closed by another `---`. Everything after the closing fence is
+    /// returned as the body.
     public static func parse(_ text: String) -> Result {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("---") else {

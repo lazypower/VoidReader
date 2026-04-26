@@ -32,6 +32,26 @@ private let highlightr: Highlightr? = {
 /// shift made scroll-percentage math unstable. The measure-first design
 /// renders at a known-stable height from the first frame.
 struct CodeBlockView: View {
+    // MARK: - Layout constants (shared with height estimation)
+
+    /// Padding above the code area on first/non-segmented blocks.
+    static let codeTopPadding: CGFloat = 12
+    /// Padding below the code area on last/non-segmented blocks.
+    static let codeBottomPadding: CGFloat = 12
+    /// Approximate height of the language badge + copy button header.
+    static let headerHeight: CGFloat = 24
+
+    /// Total non-code "chrome" height for a code block segment.
+    /// Used by `DocumentHeightIndex.defaultFallback` and
+    /// `ContentView.recordCodeBlockHeight` so height estimates stay
+    /// in sync with the actual view layout.
+    static func chromeHeight(isFirst: Bool, isLast: Bool) -> CGFloat {
+        var h: CGFloat = 0
+        if isFirst { h += codeTopPadding + headerHeight }
+        if isLast { h += codeBottomPadding }
+        return h
+    }
+
     /// Threshold above which we switch the view path to `NSTextView`.
     /// SwiftUI `Text` computes intrinsic content size eagerly over the full
     /// string — fine for typical code, beachballs for large blocks. 50KB
@@ -195,8 +215,8 @@ struct CodeBlockView: View {
             )
             .frame(height: measurement.height)
             .padding(.horizontal, 12)
-            .padding(.top, codeTopPadding)
-            .padding(.bottom, codeBottomPadding)
+            .padding(.top, codeTopPad)
+            .padding(.bottom, codeBottomPad)
         } else {
             // Placeholder while measurement is in flight. Deterministic,
             // non-zero height so the LazyVStack row has a predictable
@@ -205,8 +225,8 @@ struct CodeBlockView: View {
             Color.clear
                 .frame(height: placeholderHeight)
                 .padding(.horizontal, 12)
-                .padding(.top, codeTopPadding)
-                .padding(.bottom, codeBottomPadding)
+                .padding(.top, codeTopPad)
+                .padding(.bottom, codeBottomPad)
         }
     }
 
@@ -216,23 +236,23 @@ struct CodeBlockView: View {
             highlightedCode
                 .textSelection(.enabled)
                 .padding(.horizontal, 12)
-                .padding(.top, codeTopPadding)
-                .padding(.bottom, codeBottomPadding)
+                .padding(.top, codeTopPad)
+                .padding(.bottom, codeBottomPad)
         }
     }
 
     /// Top padding for the code content. Non-segmented blocks and segment-
     /// first blocks get the 12pt breathing room below the header; middle
     /// and last segments render flush so adjacent segments look continuous.
-    private var codeTopPadding: CGFloat {
-        data.isSegmentFirst ? 12 : 0
+    private var codeTopPad: CGFloat {
+        data.isSegmentFirst ? Self.codeTopPadding : 0
     }
 
     /// Bottom padding mirrors the top rule — last segment (or a non-
     /// segmented block) gets 12pt so the fence closes cleanly; middle
     /// segments stay flush.
-    private var codeBottomPadding: CGFloat {
-        data.isSegmentLast ? 12 : 0
+    private var codeBottomPad: CGFloat {
+        data.isSegmentLast ? Self.codeBottomPadding : 0
     }
 
     /// Corner-rounded mask that keeps the visual group looking like one

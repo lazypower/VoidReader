@@ -730,13 +730,10 @@ struct ContentView: View {
             guard case .codeBlock(let data) = block,
                   data.originalBlockSize > CodeBlockView.maxSwiftUITextChars else { continue }
 
-            // Compute the view-layer chrome that CodeBlockView adds around
-            // the raw TextKit measurement. Must match defaultFallback's
-            // chrome calculation so totalHeight doesn't jump when the
-            // authoritative measurement replaces the line-count estimate.
-            var chrome: CGFloat = 0
-            if data.isSegmentFirst { chrome += 12 + 24 }  // codeTopPadding + header
-            if data.isSegmentLast { chrome += 12 }          // codeBottomPadding
+            let chrome = CodeBlockView.chromeHeight(
+                isFirst: data.isSegmentFirst,
+                isLast: data.isSegmentLast
+            )
 
             CodeBlockMeasurementScheduler.enqueueIfNeeded(
                 code: data.code,

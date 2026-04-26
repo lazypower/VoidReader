@@ -250,17 +250,10 @@ extension DocumentHeightIndex {
             case .codeBlock(let data):
                 var lines = 1
                 for char in data.code where char == "\n" { lines += 1 }
-                // Account for which padding / header chrome actually
-                // renders on this segment. First and last (and
-                // non-segmented) blocks get both `.padding(.top, 12)` and
-                // `.padding(.bottom, 12)` around the code (24pt), plus
-                // ~24pt for the badge/copy header on the first. Middle
-                // segments render flush (no chrome). Matches
-                // `CodeBlockView.codeTopPadding` / `codeBottomPadding` /
-                // header presence.
-                var chrome: CGFloat = 0
-                if data.isSegmentFirst { chrome += 12 + 24 }  // top padding + header
-                if data.isSegmentLast { chrome += 12 }         // bottom padding
+                let chrome = CodeBlockView.chromeHeight(
+                    isFirst: data.isSegmentFirst,
+                    isLast: data.isSegmentLast
+                )
                 return CGFloat(lines) * lineHeight + chrome
             default:
                 return block.estimatedHeight
