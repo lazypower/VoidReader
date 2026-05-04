@@ -24,6 +24,8 @@ Update `CFBundleShortVersionString` in **both** targets in `project.yml`:
 
 Both must read `"$version"`. This is critical — we shipped 1.0.1 with "1.0.0" in About once. Don't repeat that.
 
+The release workflow now asserts both Info.plists match the tag version (pre-build) and asserts the built `.app` matches the tag (post-build). If `project.yml` drifts from the tag, the release job will fail before any artifact reaches Homebrew.
+
 ## Step 3: Pull performance data from Gitea
 
 Fetch the latest `test-perf-lab.yml` run results from Gitea CI:

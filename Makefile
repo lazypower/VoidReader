@@ -1,6 +1,12 @@
 # VoidReader Makefile
 # Run `make help` for available commands
 
+# Pin all xcodebuild invocations to a project-local DerivedData path so dev
+# builds can't accumulate as ghost .app bundles in ~/Library/Developer/Xcode/DerivedData
+# that LaunchServices then indexes. `make clean` nukes this dir.
+DERIVED_DATA := build/derived
+XCBUILD := xcodebuild -derivedDataPath $(DERIVED_DATA)
+
 .PHONY: help project build run run-debug test test-ui test-ui-debug clean format lint xcode setup install dmg dmg-signed staple profile
 
 # Default target
@@ -63,31 +69,31 @@ project:
 # Build (Debug)
 build:
 	@echo "Building (Debug)..."
-	xcodebuild -scheme VoidReader -configuration Debug build -quiet
+	$(XCBUILD) -scheme VoidReader -configuration Debug build -quiet
 	@echo "✓ Build succeeded"
 
 # Build (Release)
 release:
 	@echo "Building (Release)..."
-	xcodebuild -scheme VoidReader -configuration Release build -quiet
+	$(XCBUILD) -scheme VoidReader -configuration Release build -quiet
 	@echo "✓ Release build succeeded"
 
 # Install to /Applications
 install: release
 	@echo "Installing to /Applications..."
 	@rm -rf /Applications/VoidReader.app
-	@cp -R "$$(xcodebuild -scheme VoidReader -configuration Release -showBuildSettings | grep -m 1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/VoidReader.app" /Applications/
+	@cp -R "$$($(XCBUILD) -scheme VoidReader -configuration Release -showBuildSettings | grep -m 1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/VoidReader.app" /Applications/
 	@echo "✓ Installed to /Applications/VoidReader.app"
 
 # Build and run
 run: build
 	@echo "Running VoidReader..."
-	@open "$$(xcodebuild -scheme VoidReader -configuration Debug -showBuildSettings | grep -m 1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/VoidReader.app"
+	@open "$$($(XCBUILD) -scheme VoidReader -configuration Debug -showBuildSettings | grep -m 1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/VoidReader.app"
 
 # Run with debug telemetry enabled
 run-debug: build
 	@echo "Running VoidReader with debug telemetry..."
-	@VOID_READER_DEBUG=1 open "$$(xcodebuild -scheme VoidReader -configuration Debug -showBuildSettings | grep -m 1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/VoidReader.app"
+	@VOID_READER_DEBUG=1 open "$$($(XCBUILD) -scheme VoidReader -configuration Debug -showBuildSettings | grep -m 1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/VoidReader.app"
 	@echo ""
 	@echo "View logs in Console.app with filter: subsystem:com.voidreader.debug"
 
@@ -105,7 +111,7 @@ run-debug: build
 # for full runbooks. See openspec/changes/add-performance-instrumentation/
 # FINDINGS_p2_signpost_surfacing.md for why categories must be .pointsOfInterest.
 profile: build
-	@APP_PATH="$$(xcodebuild -scheme VoidReader -configuration Debug -showBuildSettings | grep -m 1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/VoidReader.app"; \
+	@APP_PATH="$$($(XCBUILD) -scheme VoidReader -configuration Debug -showBuildSettings | grep -m 1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/VoidReader.app"; \
 	case "$$APP_PATH" in *Release*) echo "ERROR: resolved path points to Release build: $$APP_PATH"; echo "        purge build/derived and retry"; exit 1 ;; esac; \
 	if [ -n "$(FILE)" ]; then \
 		ABS_FILE="$$(cd "$$(dirname "$(FILE)")" && pwd)/$$(basename "$(FILE)")"; \
@@ -149,7 +155,7 @@ profile: build
 # Run with debug telemetry and file logging
 run-debug-file: build
 	@echo "Running VoidReader with debug telemetry (file logging)..."
-	@VOID_READER_DEBUG=1 VOID_READER_DEBUG_FILE=/tmp/voidreader_debug.log open "$$(xcodebuild -scheme VoidReader -configuration Debug -showBuildSettings | grep -m 1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/VoidReader.app"
+	@VOID_READER_DEBUG=1 VOID_READER_DEBUG_FILE=/tmp/voidreader_debug.log open "$$($(XCBUILD) -scheme VoidReader -configuration Debug -showBuildSettings | grep -m 1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/VoidReader.app"
 	@echo ""
 	@echo "Logs being written to: /tmp/voidreader_debug.log"
 	@echo "Tail with: tail -f /tmp/voidreader_debug.log"
@@ -160,20 +166,20 @@ test:
 	swift test
 	@echo ""
 	@echo "Running app tests..."
-	xcodebuild -scheme VoidReader -configuration Debug test -only-testing:VoidReaderTests -quiet || true
+	$(XCBUILD) -scheme VoidReader -configuration Debug test -only-testing:VoidReaderTests -quiet || true
 	@echo "✓ Tests complete"
 
 # Run UI tests
 test-ui:
 	@echo "Running UI tests..."
-	xcodebuild -scheme VoidReader -configuration Debug test -only-testing:VoidReaderUITests -quiet || true
+	$(XCBUILD) -scheme VoidReader -configuration Debug test -only-testing:VoidReaderUITests -quiet || true
 	@echo "✓ UI tests complete"
 
 # Run UI tests with debug telemetry and capture output
 test-ui-debug:
 	@echo "Running UI tests with debug telemetry..."
 	@rm -f /tmp/voidreader_uitest_*.log
-	xcodebuild -scheme VoidReader -configuration Debug test -only-testing:VoidReaderUITests 2>&1 | tee /tmp/uitest_output.log || true
+	$(XCBUILD) -scheme VoidReader -configuration Debug test -only-testing:VoidReaderUITests 2>&1 | tee /tmp/uitest_output.log || true
 	@echo ""
 	@echo "✓ UI tests complete"
 	@echo "Debug logs written to: /tmp/voidreader_uitest_*.log"
@@ -183,8 +189,9 @@ test-ui-debug:
 clean:
 	@echo "Cleaning..."
 	rm -rf .build
+	rm -rf build
 	rm -rf ~/Library/Developer/Xcode/DerivedData/VoidReader-*
-	xcodebuild clean -scheme VoidReader -quiet 2>/dev/null || true
+	$(XCBUILD) clean -scheme VoidReader -quiet 2>/dev/null || true
 	@echo "✓ Clean complete"
 
 # Format code

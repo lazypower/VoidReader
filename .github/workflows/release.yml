@@ -24,6 +24,21 @@ jobs:
       - name: Generate Xcode project
         run: make project
 
+      - name: Verify project.yml matches tag version
+        env:
+          TAG_VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          for plist in App/Info.plist QuickLookExtension/Info.plist; do
+            actual=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$plist")
+            if [ "$actual" != "$TAG_VERSION" ]; then
+              echo "::error file=project.yml::$plist has CFBundleShortVersionString=$actual but tag is v$TAG_VERSION."
+              echo "Bump CFBundleShortVersionString in both targets in project.yml to $TAG_VERSION before re-tagging."
+              exit 1
+            fi
+          done
+          echo "✓ Both Info.plists report $TAG_VERSION"
+
       - name: Import signing certificate
         env:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
@@ -58,6 +73,20 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APP_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: make dmg-signed
+
+      - name: Verify built app version matches tag
+        env:
+          TAG_VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          MOUNT=$(hdiutil attach build/VoidReader.dmg -nobrowse -readonly | tail -1 | awk '{print $NF}')
+          trap 'hdiutil detach "$MOUNT" -quiet || true' EXIT
+          actual=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$MOUNT/VoidReader.app/Contents/Info.plist")
+          if [ "$actual" != "$TAG_VERSION" ]; then
+            echo "::error::Built VoidReader.app reports CFBundleShortVersionString=$actual but tag is v$TAG_VERSION. Refusing to publish."
+            exit 1
+          fi
+          echo "✓ Built app reports $TAG_VERSION"
 
       - name: Rename DMG for release
         run: mv build/VoidReader.dmg "build/VoidReader_v${{ steps.version.outputs.VERSION }}.dmg"
