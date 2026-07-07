@@ -50,6 +50,13 @@ private class WebViewRenderer: NSObject, WKNavigationDelegate, WKScriptMessageHa
     private let completion: (NSImage?) -> Void
     private var webView: WKWebView?
     private var timeoutTask: DispatchWorkItem?
+    /// Guards against resuming the continuation twice. `finish` is reachable from
+    /// several racing paths — the 5s timeout, the size-report handler, the
+    /// snapshot callback, and navigation-failure delegates — and the size report
+    /// resizes the webview, which re-fires the template's debounced
+    /// ResizeObserver. All paths run on the main thread, so a plain flag is
+    /// enough; a second `finish` (which would fatally double-resume) is dropped.
+    private var finished = false
 
     init(source: String, maxWidth: CGFloat, completion: @escaping (NSImage?) -> Void) {
         self.source = source
@@ -149,6 +156,9 @@ private class WebViewRenderer: NSObject, WKNavigationDelegate, WKScriptMessageHa
     }
 
     private func finish(with image: NSImage?) {
+        guard !finished else { return }
+        finished = true
+
         timeoutTask?.cancel()
         timeoutTask = nil
 

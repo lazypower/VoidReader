@@ -12,6 +12,10 @@ public final class FileWatcher {
     private let resolvedTargetPath: String
     private let callback: () -> Void
     private let queue = DispatchQueue(label: "place.wabash.VoidReader.FileWatcher")
+    /// Marks `queue` so `stop()` can detect when it is already executing there
+    /// (a callback that dropped the last reference and triggered deinit) and
+    /// avoid deadlocking on `queue.sync`.
+    private static let queueKey = DispatchSpecificKey<Void>()
 
     /// Creates a file watcher for the given URL.
     /// - Parameters:
@@ -23,6 +27,7 @@ public final class FileWatcher {
         self.resolvedTargetPath = url.resolvingSymlinksInPath().path
         self.callback = callback
 
+        queue.setSpecific(key: Self.queueKey, value: ())
         guard startStream() else { return nil }
     }
 
@@ -87,12 +92,27 @@ public final class FileWatcher {
     }
 
     /// Stops watching the file.
+    ///
+    /// Teardown runs on the stream's own dispatch queue so it serializes with
+    /// in-flight FSEvents callbacks — otherwise a callback already dequeued on
+    /// that queue could dereference `self` after `deinit` released it (the
+    /// context is `passUnretained`). The `queueKey` check covers the reentrant
+    /// case where the last reference is dropped inside a callback, so `deinit`
+    /// runs on `queue` itself and a blocking `queue.sync` would deadlock.
     public func stop() {
-        if let stream = stream {
-            FSEventStreamStop(stream)
-            FSEventStreamInvalidate(stream)
-            FSEventStreamRelease(stream)
-            self.stream = nil
+        let teardown = {
+            if let stream = self.stream {
+                FSEventStreamStop(stream)
+                FSEventStreamInvalidate(stream)
+                FSEventStreamRelease(stream)
+                self.stream = nil
+            }
+        }
+
+        if DispatchQueue.getSpecific(key: Self.queueKey) != nil {
+            teardown()
+        } else {
+            queue.sync(execute: teardown)
         }
     }
 }

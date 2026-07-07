@@ -55,6 +55,30 @@ struct FileWatcherTests {
 
     // MARK: - Tests
 
+    /// Exercises the deinit-driven teardown path (the `@State` reassignment
+    /// pattern: no explicit `stop()`) while the watched file is actively being
+    /// written. Before teardown was serialized onto the stream's queue, a
+    /// callback already dequeued there could dereference a freed watcher. This
+    /// is a smoke/stress guard — it can't deterministically force the race, but
+    /// under ASan a regression surfaces as a crash here rather than in the field.
+    @Test("Deinit without explicit stop is safe during active writes")
+    func deinitDuringActiveWritesIsSafe() async throws {
+        let url = try Self.makeTempFile()
+        defer { Self.cleanup(url) }
+
+        for iteration in 0..<25 {
+            // Create a watcher and immediately drop the only reference, relying
+            // on deinit -> stop() for teardown while writes are landing.
+            autoreleasepool {
+                let watcher = FileWatcher(url: url) { }
+                #expect(watcher != nil)
+                try? "change-\(iteration)".write(to: url, atomically: false, encoding: .utf8)
+                // watcher deallocates at end of scope with no explicit stop().
+            }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+    }
+
     @Test("Fires on direct in-place write")
     func firesOnDirectWrite() async throws {
         let url = try Self.makeTempFile(contents: "v1")
