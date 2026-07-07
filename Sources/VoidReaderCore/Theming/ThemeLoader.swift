@@ -188,7 +188,8 @@ extension String {
     /// Checks if string is a valid hex color (#RGB, #RRGGBB, or without #)
     var isValidHexColor: Bool {
         let hex = self.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        guard hex.count == 3 || hex.count == 6 else { return false }
+        // Must match what Color(hex:) can actually parse: #RGB, #RRGGBB, #AARRGGBB.
+        guard hex.count == 3 || hex.count == 6 || hex.count == 8 else { return false }
         return hex.allSatisfy { $0.isHexDigit }
     }
 }

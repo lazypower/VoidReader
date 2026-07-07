@@ -62,11 +62,15 @@ extension Color {
 
         let r, g, b: Double
         switch hex.count {
+        case 3: // RGB shorthand (#RGB → #RRGGBB, each nibble doubled)
+            r = Double((int >> 8) & 0xF) / 15.0
+            g = Double((int >> 4) & 0xF) / 15.0
+            b = Double(int & 0xF) / 15.0
         case 6: // RGB
             r = Double((int >> 16) & 0xFF) / 255.0
             g = Double((int >> 8) & 0xFF) / 255.0
             b = Double(int & 0xFF) / 255.0
-        case 8: // ARGB
+        case 8: // ARGB (alpha ignored)
             r = Double((int >> 16) & 0xFF) / 255.0
             g = Double((int >> 8) & 0xFF) / 255.0
             b = Double(int & 0xFF) / 255.0
