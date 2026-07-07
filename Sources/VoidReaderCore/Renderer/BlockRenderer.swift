@@ -740,7 +740,11 @@ struct BlockWalker: MarkupWalker {
         guard !raw.isEmpty, !(raw.hasPrefix("<!--") && raw.hasSuffix("-->")) else { return }
         flushTextBuffer()
         isFirstBlock = false
-        blocks.append(.codeBlock(CodeBlockData(code: raw, language: "html")))
+        // Segment like a fenced block so a huge HTML block doesn't become one
+        // pathologically tall row.
+        for segment in BlockRenderer.segmentCodeBlock(code: raw, language: "html") {
+            blocks.append(.codeBlock(segment))
+        }
     }
 
     // MARK: - Helpers
@@ -789,6 +793,18 @@ struct BlockWalker: MarkupWalker {
                 var str = renderInlineContent(emphasis)
                 str.font = style.makeFont(size: style.bodySize).italic()
                 result += str
+            } else if let inlineHTML = child as? InlineHTML {
+                // Preserve raw inline HTML here too (table cells, task items),
+                // consistent with visitInlineHTML on the main path.
+                let raw = inlineHTML.rawHTML
+                let trimmed = raw.trimmingCharacters(in: .whitespaces).lowercased()
+                if trimmed == "<br>" || trimmed == "<br/>" || trimmed == "<br />" {
+                    result += AttributedString("\n")
+                } else if !trimmed.hasPrefix("<!--") {
+                    var str = AttributedString(raw)
+                    str.font = style.makeCodeFont(size: style.codeSize)
+                    result += str
+                }
             } else if let code = child as? InlineCode {
                 var str = AttributedString(code.code)
                 str.font = style.makeCodeFont(size: style.codeSize)

@@ -162,6 +162,28 @@ struct BlockRendererTests {
         #expect(code.contains("summary"))
     }
 
+    @Test("Inline HTML in a table cell is preserved")
+    func inlineHTMLInTableCell() {
+        let md = "| Key | Value |\n| --- | --- |\n| Shortcut | <kbd>Cmd</kbd> |"
+        var found = false
+        for block in BlockRenderer.render(md) {
+            if case .table(let data) = block {
+                for row in data.rows {
+                    for cell in row where String(cell.content.characters).contains("<kbd>") { found = true }
+                }
+            }
+        }
+        #expect(found)
+    }
+
+    @Test("A very large HTML block is segmented, not one tall row")
+    func largeHTMLBlockSegmented() {
+        let body = Array(repeating: "<span>x</span>", count: 900).joined(separator: "\n")
+        let blocks = BlockRenderer.render("<div>\n\(body)\n</div>")
+        let codeBlocks = blocks.filter { if case .codeBlock = $0 { return true }; return false }
+        #expect(codeBlocks.count > 1)
+    }
+
     @Test("HTML comments are dropped, not shown")
     func htmlCommentDropped() {
         let blocks = BlockRenderer.render("<!-- secret note -->")
