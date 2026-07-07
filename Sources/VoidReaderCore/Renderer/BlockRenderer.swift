@@ -396,23 +396,23 @@ struct BlockWalker: MarkupWalker {
             return m
         }
 
-        var firstParagraph = true
+        var emittedContent = false
         for child in blockQuote.children {
             if let para = child as? Paragraph {
-                // Separate consecutive paragraphs with a blank line and re-emit
-                // the quote marker — otherwise two paragraphs fuse into
-                // "│ para1para2" with no boundary.
-                if !firstParagraph {
+                // Separate a paragraph from any preceding blockquote content with
+                // a blank line and a fresh marker — otherwise paragraphs (or a
+                // paragraph after a list) fuse with no boundary or lose the marker.
+                if emittedContent {
                     textBuffer += AttributedString("\n\n")
                     textBuffer += quoteMarker()
                 }
-                firstParagraph = false
                 for pChild in para.children {
                     visit(pChild)
                 }
             } else {
                 visit(child)
             }
+            emittedContent = true
         }
 
         isItalic = savedItalic

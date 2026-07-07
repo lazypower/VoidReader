@@ -129,6 +129,17 @@ struct BlockRendererTests {
         }
         #expect(boldHasLink)
     }
+
+    @Test("Blockquote paragraph after a list is separated, not fused")
+    func blockquoteParagraphAfterList() {
+        let markdown = "> - item\n>\n> para"
+        let text = BlockRenderer.render(markdown).compactMap { block -> String? in
+            if case .text(let attr) = block { return String(attr.characters) } else { return nil }
+        }.joined(separator: "\n")
+        #expect(text.contains("item"))
+        #expect(text.contains("para"))
+        #expect(!text.contains("itempara"))
+    }
 }
 
 @Suite("Markdown Parser Tests")
