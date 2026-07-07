@@ -130,6 +130,51 @@ struct BlockRendererTests {
         #expect(boldHasLink)
     }
 
+    // §4.4 — raw HTML is preserved rather than silently dropped
+
+    private func joinedText(_ blocks: [MarkdownBlock]) -> String {
+        blocks.compactMap { block -> String? in
+            if case .text(let attr) = block { return String(attr.characters) } else { return nil }
+        }.joined(separator: "\n")
+    }
+
+    @Test("Inline HTML tags render verbatim instead of vanishing")
+    func inlineHTMLPreserved() {
+        let text = joinedText(BlockRenderer.render("Press <kbd>Cmd</kbd> now"))
+        #expect(text.contains("<kbd>"))
+        #expect(text.contains("Cmd"))
+    }
+
+    @Test("Inline <br> becomes a newline")
+    func inlineBreakBecomesNewline() {
+        let text = joinedText(BlockRenderer.render("line1<br>line2"))
+        #expect(text.contains("line1"))
+        #expect(text.contains("line2"))
+        #expect(!text.contains("<br>"))
+    }
+
+    @Test("Block-level HTML survives as a code block")
+    func blockHTMLPreserved() {
+        let blocks = BlockRenderer.render("<details>\n<summary>More</summary>\ndetail\n</details>")
+        let code = blocks.compactMap { block -> String? in
+            if case .codeBlock(let data) = block { return data.code } else { return nil }
+        }.joined()
+        #expect(code.contains("summary"))
+    }
+
+    @Test("HTML comments are dropped, not shown")
+    func htmlCommentDropped() {
+        let blocks = BlockRenderer.render("<!-- secret note -->")
+        let showsSecret = blocks.contains { block in
+            switch block {
+            case .codeBlock(let d): return d.code.contains("secret")
+            case .text(let a): return String(a.characters).contains("secret")
+            default: return false
+            }
+        }
+        #expect(!showsSecret)
+    }
+
     @Test("Blockquote paragraph after a list is separated, not fused")
     func blockquoteParagraphAfterList() {
         let markdown = "> - item\n>\n> para"

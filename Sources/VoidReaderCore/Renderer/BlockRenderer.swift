@@ -716,6 +716,33 @@ struct BlockWalker: MarkupWalker {
         textBuffer += AttributedString("\n")
     }
 
+    mutating func visitInlineHTML(_ inlineHTML: InlineHTML) {
+        let raw = inlineHTML.rawHTML
+        let trimmed = raw.trimmingCharacters(in: .whitespaces).lowercased()
+        if trimmed == "<br>" || trimmed == "<br/>" || trimmed == "<br />" {
+            // A hard break — the one HTML tag with an obvious semantic mapping.
+            textBuffer += AttributedString("\n")
+        } else if trimmed.hasPrefix("<!--") {
+            // Comment — intentionally invisible; drop it.
+        } else {
+            // Anything else: render the raw tag verbatim in monospace rather than
+            // dropping it silently (README <kbd>, <sup>, <details>, etc.).
+            var str = AttributedString(raw)
+            str.font = style.makeCodeFont(size: style.codeSize)
+            textBuffer += str
+        }
+    }
+
+    mutating func visitHTMLBlock(_ html: HTMLBlock) {
+        let raw = html.rawHTML.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Drop pure comments; render other raw HTML blocks verbatim as a code
+        // block so their content survives instead of vanishing.
+        guard !raw.isEmpty, !(raw.hasPrefix("<!--") && raw.hasSuffix("-->")) else { return }
+        flushTextBuffer()
+        isFirstBlock = false
+        blocks.append(.codeBlock(CodeBlockData(code: raw, language: "html")))
+    }
+
     // MARK: - Helpers
 
     /// Renders inline content (for table cells, etc.)
