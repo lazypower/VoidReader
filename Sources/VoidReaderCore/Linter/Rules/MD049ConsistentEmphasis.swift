@@ -1,8 +1,9 @@
 import Foundation
 import Markdown
 
-/// MD049: Emphasis markers should be consistent.
-/// All emphasis should use the same marker style (* or _).
+/// MD049: Emphasis (italic) markers should be consistent — all `*` or all `_`.
+/// Strong (bold) consistency is a *separate* rule (MD050), matching markdownlint;
+/// pooling them flagged a valid `_italic_` + `**bold**` document as inconsistent.
 public struct MD049ConsistentEmphasis: LintRule {
     public let id = "MD049"
     public let description = "Emphasis markers should be consistent"
@@ -10,86 +11,63 @@ public struct MD049ConsistentEmphasis: LintRule {
     public init() {}
 
     public func check(document: Document, source: String) -> [LintWarning] {
-        var warnings: [LintWarning] = []
-
-        // Find all emphasis markers in source
-        var markers: [(line: Int, column: Int, marker: Character)] = []
-
-        var walker = EmphasisWalker(source: source)
-        walker.visit(document)
-        markers = walker.markers
-
-        guard !markers.isEmpty else { return [] }
-
-        // Use the first marker as the expected style
-        let expectedMarker = markers[0].marker
-
-        for item in markers.dropFirst() {
-            if item.marker != expectedMarker {
-                warnings.append(LintWarning(
-                    line: item.line,
-                    column: item.column,
-                    message: "Expected '\(expectedMarker)' but found '\(item.marker)'",
-                    ruleID: id
-                ))
-            }
-        }
-
-        return warnings
+        var scanner = MarkerScanner(source: source, target: .emphasis)
+        scanner.visit(document)
+        return MarkerScanner.consistencyWarnings(scanner.markers, ruleID: id)
     }
 }
 
-private struct EmphasisWalker: MarkupWalker {
-    let source: String
+/// Collects emphasis OR strong marker characters from source and flags any that
+/// differ from the first. Shared by MD049 (emphasis) and MD050 (strong) so the
+/// two consistency checks stay independent.
+struct MarkerScanner: MarkupWalker {
+    enum Target { case emphasis, strong }
+
     let lines: [String]
+    let target: Target
     var markers: [(line: Int, column: Int, marker: Character)] = []
 
-    init(source: String) {
-        self.source = source
+    init(source: String, target: Target) {
         self.lines = source.components(separatedBy: "\n")
+        self.target = target
     }
 
-    mutating func visitEmphasis(_ emphasis: Emphasis) -> () {
-        if let range = emphasis.range {
-            let line = range.lowerBound.line
-            let column = range.lowerBound.column
-
-            // Get the marker from source
-            if line <= lines.count {
-                let lineText = lines[line - 1]
-                let startIndex = lineText.index(lineText.startIndex, offsetBy: max(0, column - 1), limitedBy: lineText.endIndex) ?? lineText.startIndex
-
-                if startIndex < lineText.endIndex {
-                    let marker = lineText[startIndex]
-                    if marker == "*" || marker == "_" {
-                        markers.append((line: line, column: column, marker: marker))
-                    }
-                }
-            }
-        }
-
+    mutating func visitEmphasis(_ emphasis: Emphasis) {
+        if target == .emphasis { collect(emphasis.range) }
         descendInto(emphasis)
     }
 
-    mutating func visitStrong(_ strong: Strong) -> () {
-        if let range = strong.range {
-            let line = range.lowerBound.line
-            let column = range.lowerBound.column
-
-            // Get the marker from source
-            if line <= lines.count {
-                let lineText = lines[line - 1]
-                let startIndex = lineText.index(lineText.startIndex, offsetBy: max(0, column - 1), limitedBy: lineText.endIndex) ?? lineText.startIndex
-
-                if startIndex < lineText.endIndex {
-                    let marker = lineText[startIndex]
-                    if marker == "*" || marker == "_" {
-                        markers.append((line: line, column: column, marker: marker))
-                    }
-                }
-            }
-        }
-
+    mutating func visitStrong(_ strong: Strong) {
+        if target == .strong { collect(strong.range) }
         descendInto(strong)
+    }
+
+    private mutating func collect(_ range: SourceRange?) {
+        guard let range, range.lowerBound.line >= 1, range.lowerBound.line <= lines.count else { return }
+        let line = range.lowerBound.line
+        let column = range.lowerBound.column
+        let lineText = lines[line - 1]
+        let startIndex = lineText.index(
+            lineText.startIndex, offsetBy: max(0, column - 1), limitedBy: lineText.endIndex
+        ) ?? lineText.startIndex
+        guard startIndex < lineText.endIndex else { return }
+        let marker = lineText[startIndex]
+        if marker == "*" || marker == "_" {
+            markers.append((line: line, column: column, marker: marker))
+        }
+    }
+
+    static func consistencyWarnings(
+        _ markers: [(line: Int, column: Int, marker: Character)], ruleID: String
+    ) -> [LintWarning] {
+        guard let expected = markers.first?.marker else { return [] }
+        return markers.dropFirst().compactMap { item in
+            item.marker == expected ? nil : LintWarning(
+                line: item.line,
+                column: item.column,
+                message: "Expected '\(expected)' but found '\(item.marker)'",
+                ruleID: ruleID
+            )
+        }
     }
 }
