@@ -29,11 +29,19 @@ public struct MarkdownParser {
     /// - Returns: Array of headings with their level and text
     public static func extractHeadings(from document: Document) -> [HeadingInfo] {
         var headings: [HeadingInfo] = []
+        // Track how many times each base slug has appeared so duplicate heading
+        // texts get GitHub-style -1/-2 suffixes; otherwise every "Overview"
+        // anchor resolves to the first one.
+        var slugCounts: [String: Int] = [:]
 
         for child in document.children {
             if let heading = child as? Heading {
                 let text = heading.plainText
-                headings.append(HeadingInfo(level: heading.level, text: text))
+                let base = HeadingInfo.slug(from: text)
+                let priorCount = slugCounts[base, default: 0]
+                slugCounts[base] = priorCount + 1
+                let uniqueSlug = priorCount == 0 ? base : "\(base)-\(priorCount)"
+                headings.append(HeadingInfo(level: heading.level, text: text, slug: uniqueSlug))
             }
         }
 
@@ -47,17 +55,15 @@ public struct HeadingInfo: Identifiable {
     public let level: Int
     public let text: String
 
-    /// GitHub-style anchor slug for in-document linking.
-    /// e.g. "My Section (v2)" → "my-section-v2"
-    public var slug: String {
-        text.lowercased()
-            .replacingOccurrences(of: " ", with: "-")
-            .filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
-    }
+    /// GitHub-style anchor slug for in-document linking, unique within the
+    /// document (duplicates carry a -1/-2 suffix assigned by `extractHeadings`).
+    /// e.g. "My Section (v2)" → "my-section-v2".
+    public let slug: String
 
-    public init(level: Int, text: String) {
+    public init(level: Int, text: String, slug: String? = nil) {
         self.level = level
         self.text = text
+        self.slug = slug ?? HeadingInfo.slug(from: text)
     }
 
     /// Generates a slug from arbitrary heading text (static version for link resolution).

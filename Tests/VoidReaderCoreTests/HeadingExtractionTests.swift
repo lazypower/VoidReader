@@ -159,4 +159,14 @@ struct HeadingExtractionTests {
         let ids = Set(headings.map { $0.id })
         #expect(ids.count == 3) // All unique
     }
+
+    @Test("Duplicate heading texts get unique GitHub-style slugs")
+    func dedupesSlugs() {
+        let doc = MarkdownParser.parse("# Overview\n\n## Overview\n\n## Overview")
+        let headings = MarkdownParser.extractHeadings(from: doc)
+        #expect(headings.count == 3)
+        #expect(headings[0].slug == "overview")
+        #expect(headings[1].slug == "overview-1")
+        #expect(headings[2].slug == "overview-2")
+    }
 }
