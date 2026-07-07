@@ -13,27 +13,38 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         self.view = NSView()
     }
 
-    /// Upper bound on the characters handed to the synchronous renderer. A Quick
-    /// Look preview must be fast and bounded; a multi-megabyte document is
-    /// truncated with a note rather than blocking the preview on a full parse.
+    /// Upper bound on bytes read from disk. A Quick Look preview must stay fast
+    /// and bounded, so a pathologically large file is never fully loaded and
+    /// decoded before the character cap can apply. Sized to comfortably cover
+    /// `maxPreviewCharacters` of typical UTF-8.
+    private static let maxPreviewBytes = 1_048_576  // 1 MB
+    /// Upper bound on the characters handed to the synchronous renderer.
     private static let maxPreviewCharacters = 200_000
 
     func preparePreviewOfFile(at url: URL, completionHandler handler: @escaping (Error?) -> Void) {
-        // Load the markdown file
-        guard let data = try? Data(contentsOf: url),
-              let fullText = String(data: data, encoding: .utf8) else {
+        // Read at most maxPreviewBytes rather than the whole file — a 500 MB
+        // `.md` must not be slurped into memory and decoded before the cap hits.
+        guard let handle = try? FileHandle(forReadingFrom: url) else {
             handler(NSError(domain: "VoidReader", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "Could not read markdown file"
             ]))
             return
         }
+        defer { try? handle.close() }
 
-        let text: String
-        if fullText.count > Self.maxPreviewCharacters {
-            text = String(fullText.prefix(Self.maxPreviewCharacters))
-                + "\n\n---\n\n*Preview truncated — open in VoidReader to view the full document.*"
-        } else {
-            text = fullText
+        let rawData = (try? handle.read(upToCount: Self.maxPreviewBytes + 1)) ?? Data()
+        var truncated = rawData.count > Self.maxPreviewBytes
+        let bounded = truncated ? rawData.prefix(Self.maxPreviewBytes) : rawData
+
+        // Lossy UTF-8 decode tolerates a multibyte sequence clipped at the byte
+        // cap; Quick Look only handles markdown UTIs, so the input is text.
+        var text = String(decoding: bounded, as: UTF8.self)
+        if text.count > Self.maxPreviewCharacters {
+            text = String(text.prefix(Self.maxPreviewCharacters))
+            truncated = true
+        }
+        if truncated {
+            text += "\n\n---\n\n*Preview truncated — open in VoidReader to view the full document.*"
         }
 
         // Create the SwiftUI preview view
@@ -278,7 +289,12 @@ private struct QuickLookImageView: View {
             return NSImage(contentsOf: url)
         }
 
-        // Relative path - resolve from document directory
+        // Relative path - resolve from document directory.
+        // Note: the Quick Look extension is sandboxed (required for it to load),
+        // and its read grant covers only the previewed file, not sibling images.
+        // So a relative `![x](img.png)` may not load here; the view falls back to
+        // a labelled placeholder rather than failing. Opening the document in the
+        // app (unsandboxed) renders the image normally.
         let documentDirectory = documentURL.deletingLastPathComponent()
         let resolvedURL = documentDirectory.appendingPathComponent(source).standardized
         return NSImage(contentsOf: resolvedURL)

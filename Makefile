@@ -163,14 +163,19 @@ run-debug-file: build
 
 # Run tests (unit tests only)
 #
-# `swift test` is the authoritative run for core logic and fails the target on
-# any failure. The VoidReaderTests Xcode target compiles the same core test
-# sources against the app bundle, so running it here only duplicated the suite;
-# app/view compilation is already covered by `make build`. UI tests live under
-# `make test-ui`.
+# Two legs, both authoritative — neither masked with `|| true`:
+#   - `swift test` runs the core suite fast.
+#   - the VoidReaderTests Xcode target additionally covers suites guarded by
+#     `#if canImport(VoidReader)` (e.g. DocumentHeightIndexTests), which import
+#     the app module and therefore compile out under SwiftPM. Dropping this leg
+#     would silently skip them.
+# UI tests live under `make test-ui`.
 test:
 	@echo "Running package tests..."
 	swift test
+	@echo ""
+	@echo "Running app-target tests (covers #if canImport(VoidReader) suites)..."
+	$(XCBUILD) -scheme VoidReader -configuration Debug test -only-testing:VoidReaderTests -quiet
 	@echo "✓ Tests complete"
 
 # Run UI tests
