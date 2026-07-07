@@ -52,7 +52,7 @@ struct ContentView: View {
     @State private var showingShare = false
 
     // Scroll position tracking
-    @State private var scrollOffset: CGFloat = 0
+    @State private var hasRestoredScroll = false
     @State private var contentHeight: CGFloat = 0
     @State private var visibleHeight: CGFloat = 0
     @State private var scrollProxy: ScrollViewProxy?
@@ -1208,12 +1208,15 @@ struct ContentView: View {
             }
             .onAppear {
                 scrollProxy = proxy
+                // Small/sync documents never toggle isRendering, so also try to
+                // restore here; the hasRestoredScroll guard keeps it to once.
+                restoreScrollPosition(proxy: proxy)
             }
             .onDisappear {
                 saveScrollPosition()
             }
             .onChange(of: isRendering) { _, newValue in
-                // Restore scroll position after rendering completes
+                // Restore scroll position after progressive rendering completes.
                 if !newValue && !renderedBlocks.isEmpty {
                     restoreScrollPosition(proxy: proxy)
                 }
@@ -1254,13 +1257,19 @@ struct ContentView: View {
 
     private func saveScrollPosition() {
         guard let path = fileURL?.path else { return }
-        // Save normalized position (0-1)
-        let normalized = contentHeight > 0 ? scrollOffset / contentHeight : 0
-        ScrollPositionStore.shared.savePosition(normalized, for: path)
+        // Save the fraction using the LIVE scroll offset (scrollOffsetForPercent,
+        // the one the observer actually updates) over the authoritative
+        // DocumentHeightIndex.totalHeight — the same coordinate space restore
+        // uses. The old code divided a never-updated `scrollOffset` by the SwiftUI
+        // contentHeight, so it saved 0 for every document.
+        let total = documentHeightIndex.totalHeight
+        let fraction = total > 0 ? min(max(Double(scrollOffsetForPercent / total), 0), 1) : 0
+        ScrollPositionStore.shared.savePosition(fraction, for: path)
     }
 
     private func restoreScrollPosition(proxy: ScrollViewProxy) {
-        guard let path = fileURL?.path,
+        guard !hasRestoredScroll,
+              let path = fileURL?.path,
               let savedFraction = ScrollPositionStore.shared.position(for: path),
               savedFraction > 0.01 else { return }
 
@@ -1269,6 +1278,9 @@ struct ContentView: View {
         // map the saved fraction to the nearest block and scroll to its anchor
         // (the reader tags each row `.id("block-<index>")`).
         func attempt(_ remaining: Int) {
+            // Don't yank the user if they've already scrolled away from the top.
+            guard scrollOffsetForPercent < 50 else { hasRestoredScroll = true; return }
+
             let total = documentHeightIndex.totalHeight
             guard total > 0 else {
                 if remaining > 0 {
@@ -1276,6 +1288,7 @@ struct ContentView: View {
                 }
                 return
             }
+            hasRestoredScroll = true
             let targetOffset = total * CGFloat(savedFraction)
             let blockIdx = documentHeightIndex.blockIndex(atOffset: targetOffset)
             proxy.scrollTo("block-\(blockIdx)", anchor: .top)
