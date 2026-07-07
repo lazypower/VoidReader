@@ -535,7 +535,7 @@ struct ContentView: View {
 
     private func updateHeadings(from text: String) {
         // For small documents, parse synchronously
-        if text.count < 50_000 {
+        if text.count < RenderingThresholds.syncRenderMaxChars {
             let doc = MarkdownParser.parse(text)
             headings = MarkdownParser.extractHeadings(from: doc)
             return
@@ -575,7 +575,7 @@ struct ContentView: View {
         let renderingSignposter = Signposts.signposter(for: .rendering)
 
         // For small documents, render synchronously to avoid flicker
-        if text.count < 50_000 {
+        if text.count < RenderingThresholds.syncRenderMaxChars {
             DebugLog.log(.rendering, "updateRenderedBlocks: sync path (\(text.count) chars)")
             // Signpost: renderBatch index=0 — sync path is one batch covering the full doc.
             // parseMarkdown nests inside this interval (BlockRenderer.render emits it).

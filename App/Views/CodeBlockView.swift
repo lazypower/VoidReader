@@ -54,18 +54,16 @@ struct CodeBlockView: View {
 
     /// Threshold above which we switch the view path to `NSTextView`.
     /// SwiftUI `Text` computes intrinsic content size eagerly over the full
-    /// string — fine for typical code, beachballs for large blocks. 50KB
-    /// is the empirical knee. This is a *layout* threshold, distinct from
-    /// `maxHighlightChars` below.
-    static let maxSwiftUITextChars = 50_000
+    /// string — fine for typical code, beachballs for large blocks. This is a
+    /// *layout* threshold, distinct from `maxHighlightChars` below. Both derive
+    /// from the single `RenderingThresholds` authority so they can't drift.
+    static let maxSwiftUITextChars = RenderingThresholds.codeBlockSwiftUITextMaxChars
 
-    /// Safety ceiling on highlight work. The highlighted
-    /// `NSAttributedString` weighs ~160x the raw bytes (attribute runs per
-    /// token + retained JSC heap). 1MB caps single-block cost at ~160MB —
-    /// chunky but tolerable — while still covering every realistic
-    /// hand-written block. See `CodeBlockMeasurement.maxHighlightChars`
-    /// which mirrors this on the off-main path.
-    static let maxHighlightChars = 1_000_000
+    /// Safety ceiling on highlight work. The highlighted `NSAttributedString`
+    /// weighs ~160x the raw bytes (attribute runs per token + retained JSC
+    /// heap), so this caps single-block cost. The off-main measurer
+    /// (`CodeBlockMeasurement`) reads the same authority.
+    static let maxHighlightChars = RenderingThresholds.maxHighlightChars
 
     /// Dedicated queue for the small-block highlight path.  Large blocks
     /// route through `CodeBlockMeasurementScheduler.queue` instead.

@@ -83,7 +83,7 @@ struct SyntaxHighlightingEditor: NSViewRepresentable {
 
         // For large documents, only highlight visible region initially
         // This prevents editor freeze on open
-        let isVisibleOnly = charCount > 50_000
+        let isVisibleOnly = charCount > RenderingThresholds.editorVisibleHighlightChars
             && textView.layoutManager != nil
             && textView.textContainer != nil
 
@@ -243,7 +243,7 @@ struct SyntaxHighlightingEditor: NSViewRepresentable {
         @objc private func scrollViewDidEndScroll(_ notification: Notification) {
             guard let scrollView = notification.object as? NSScrollView,
                   let textView = scrollView.documentView as? NSTextView,
-                  textView.string.count > 50_000 else { return }
+                  textView.string.count > RenderingThresholds.editorVisibleHighlightChars else { return }
 
             // Debounce scroll-end rehighlight (100ms after scroll stops)
             scrollHighlightTimer?.invalidate()
@@ -281,7 +281,7 @@ struct SyntaxHighlightingEditor: NSViewRepresentable {
 
             // For large documents (>50K chars), only highlight visible region + buffer
             // This dramatically improves editing performance
-            if charCount > 50_000 {
+            if charCount > RenderingThresholds.editorVisibleHighlightChars {
                 rehighlightVisibleRegion(textView)
             } else {
                 rehighlightFull(textView)
