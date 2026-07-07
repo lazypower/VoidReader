@@ -102,6 +102,33 @@ struct BlockRendererTests {
             }
         }
     }
+
+    // §4.6 — blockquote paragraph separation and styled links
+
+    @Test("Two-paragraph blockquote does not fuse its paragraphs")
+    func blockquoteParagraphsSeparated() {
+        let markdown = "> para1\n>\n> para2"
+        let text = BlockRenderer.render(markdown).compactMap { block -> String? in
+            if case .text(let attr) = block { return String(attr.characters) } else { return nil }
+        }.joined(separator: "\n")
+        #expect(text.contains("para1"))
+        #expect(text.contains("para2"))
+        #expect(!text.contains("para1para2"))
+    }
+
+    @Test("Bold text inside a link keeps the link attribute")
+    func styledLinkKeepsLink() {
+        let blocks = BlockRenderer.render("See [**bold**](https://example.com) here")
+        var boldHasLink = false
+        for block in blocks {
+            if case .text(let attr) = block {
+                for run in attr.runs where run.link != nil {
+                    if String(attr[run.range].characters).contains("bold") { boldHasLink = true }
+                }
+            }
+        }
+        #expect(boldHasLink)
+    }
 }
 
 @Suite("Markdown Parser Tests")

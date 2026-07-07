@@ -389,8 +389,24 @@ struct BlockWalker: MarkupWalker {
         isItalic = true
         inBlockquote = true
 
+        func quoteMarker() -> AttributedString {
+            var m = AttributedString("│ ")
+            m.font = style.makeFont(size: style.bodySize).italic()
+            m.foregroundColor = style.resolvedBlockquoteColor
+            return m
+        }
+
+        var firstParagraph = true
         for child in blockQuote.children {
             if let para = child as? Paragraph {
+                // Separate consecutive paragraphs with a blank line and re-emit
+                // the quote marker — otherwise two paragraphs fuse into
+                // "│ para1para2" with no boundary.
+                if !firstParagraph {
+                    textBuffer += AttributedString("\n\n")
+                    textBuffer += quoteMarker()
+                }
+                firstParagraph = false
                 for pChild in para.children {
                     visit(pChild)
                 }
@@ -662,6 +678,10 @@ struct BlockWalker: MarkupWalker {
             }
         }
 
+        // Remember where this link's content starts so styled children (e.g.
+        // the bold in `[**bold**](url)`, which go through `visit`) can be given
+        // the link + link color afterward — otherwise that run isn't clickable.
+        let linkStart = textBuffer.endIndex
         for child in link.children {
             if let text = child as? Markdown.Text {
                 var linkString = AttributedString(text.string)
@@ -670,6 +690,11 @@ struct BlockWalker: MarkupWalker {
             } else {
                 visit(child)
             }
+        }
+        if let url = attrs.link, linkStart < textBuffer.endIndex {
+            let range = linkStart..<textBuffer.endIndex
+            textBuffer[range].link = url
+            textBuffer[range].foregroundColor = style.resolvedLinkColor
         }
     }
 
