@@ -59,16 +59,6 @@ public struct SourceLines {
         return lines[index]
     }
 
-    /// Get line number (1-based) for a character index.
-    public func lineNumber(for index: String.Index, in source: String) -> Int {
-        for (lineIndex, start) in lineStarts.enumerated().reversed() {
-            if index >= start {
-                return lineIndex + 1
-            }
-        }
-        return 1
-    }
-
     /// All lines as array of strings.
     public var allLines: [String] {
         lines.map(String.init)

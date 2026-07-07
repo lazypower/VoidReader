@@ -85,19 +85,6 @@ struct MarkdownPerformanceTests {
         #expect(parsed.childCount > 0, "Document should have content")
     }
 
-    @Test("Renders large document within reasonable time")
-    func rendersLargeDocument() throws {
-        let document = generateLargeDocument(paragraphs: 200)
-
-        let startTime = Date()
-        let result = try MarkdownRenderer.render(document)
-        let renderTime = Date().timeIntervalSince(startTime)
-
-        // Should render in under 2 seconds
-        #expect(renderTime < 2.0, "Rendering took \(renderTime)s, should be under 2s")
-        #expect(!result.characters.isEmpty, "Result should have content")
-    }
-
     @Test("Block renderer handles large document")
     func blockRendererLargeDocument() {
         let document = generateLargeDocument(paragraphs: 200)
@@ -123,8 +110,7 @@ struct MarkdownPerformanceTests {
     }
 
     @Test("Handles very long lines")
-    func handlesVeryLongLines() throws {
-        // Create a paragraph with a very long line
+    func handlesVeryLongLines() {
         let longLine = String(repeating: "word ", count: 1000)
         let document = """
         # Long Line Test
@@ -133,26 +119,25 @@ struct MarkdownPerformanceTests {
 
         Another normal paragraph.
         """
-
-        let result = try MarkdownRenderer.render(document)
-        #expect(String(result.characters).contains("word"))
+        #expect(Self.renderedText(document).contains("word"))
     }
 
     @Test("Handles deeply nested lists")
-    func handlesDeeplyNestedLists() throws {
+    func handlesDeeplyNestedLists() {
         var nested = ""
         for i in 0..<10 {
             nested += String(repeating: "  ", count: i) + "- Level \(i)\n"
         }
+        let document = "# Nested List Test\n\n\(nested)"
+        let text = Self.renderedText(document)
+        #expect(text.contains("Level 0"))
+        #expect(text.contains("Level 9"))
+    }
 
-        let document = """
-        # Nested List Test
-
-        \(nested)
-        """
-
-        let result = try MarkdownRenderer.render(document)
-        #expect(String(result.characters).contains("Level 0"))
-        #expect(String(result.characters).contains("Level 9"))
+    /// Concatenated plain text of all rendered `.text` blocks.
+    private static func renderedText(_ markdown: String) -> String {
+        BlockRenderer.render(markdown).compactMap { block in
+            if case .text(let attr) = block { return String(attr.characters) } else { return nil }
+        }.joined(separator: "\n")
     }
 }
