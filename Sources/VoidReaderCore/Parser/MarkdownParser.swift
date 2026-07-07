@@ -29,18 +29,24 @@ public struct MarkdownParser {
     /// - Returns: Array of headings with their level and text
     public static func extractHeadings(from document: Document) -> [HeadingInfo] {
         var headings: [HeadingInfo] = []
-        // Track how many times each base slug has appeared so duplicate heading
-        // texts get GitHub-style -1/-2 suffixes; otherwise every "Overview"
-        // anchor resolves to the first one.
-        var slugCounts: [String: Int] = [:]
+        // Track the slugs actually ASSIGNED (not just base counts) so a heading
+        // whose natural slug equals an earlier dedup suffix — e.g. "Overview",
+        // "Overview", "Overview 1" → overview, overview-1, overview-1-1 — still
+        // gets a unique, reachable anchor. Otherwise every duplicate resolves to
+        // the first match.
+        var assigned: Set<String> = []
 
         for child in document.children {
             if let heading = child as? Heading {
                 let text = heading.plainText
                 let base = HeadingInfo.slug(from: text)
-                let priorCount = slugCounts[base, default: 0]
-                slugCounts[base] = priorCount + 1
-                let uniqueSlug = priorCount == 0 ? base : "\(base)-\(priorCount)"
+                var uniqueSlug = base
+                var suffix = 1
+                while assigned.contains(uniqueSlug) {
+                    uniqueSlug = "\(base)-\(suffix)"
+                    suffix += 1
+                }
+                assigned.insert(uniqueSlug)
                 headings.append(HeadingInfo(level: heading.level, text: text, slug: uniqueSlug))
             }
         }
