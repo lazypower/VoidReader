@@ -10,10 +10,14 @@ struct ResizableSplitView<Left: View, Right: View>: View {
     let maxLeftFraction: CGFloat
 
     /// The divider fraction captured at the start of a drag. `DragGesture`
-    /// reports translation cumulatively from the drag's start, so we must add it
-    /// to the *start* fraction — adding it to the already-updated `leftFraction`
+    /// reports translation cumulatively from the drag's start, so we add it to
+    /// the *start* fraction — adding it to the already-updated `leftFraction`
     /// each tick double-counts and makes the divider accelerate away.
-    @State private var dragStartFraction: CGFloat?
+    ///
+    /// Held as `@GestureState` so it resets to `nil` automatically when the
+    /// gesture ends *or is cancelled/interrupted* — a plain `@State` cleared only
+    /// in `onEnded` could keep a stale anchor and make the next drag jump.
+    @GestureState private var dragAnchorFraction: CGFloat?
 
     init(
         leftFraction: Binding<CGFloat>,
@@ -48,14 +52,15 @@ struct ResizableSplitView<Left: View, Right: View>: View {
                     )
                     .gesture(
                         DragGesture()
+                            .updating($dragAnchorFraction) { _, anchor, _ in
+                                // Captured once at gesture start (leftFraction is
+                                // still the pre-drag value here); auto-resets on end.
+                                if anchor == nil { anchor = leftFraction }
+                            }
                             .onChanged { value in
-                                let start = dragStartFraction ?? leftFraction
-                                if dragStartFraction == nil { dragStartFraction = start }
+                                let start = dragAnchorFraction ?? leftFraction
                                 let newFraction = (geo.size.width * start + value.translation.width) / geo.size.width
                                 leftFraction = min(max(newFraction, minLeftFraction), maxLeftFraction)
-                            }
-                            .onEnded { _ in
-                                dragStartFraction = nil
                             }
                     )
 
