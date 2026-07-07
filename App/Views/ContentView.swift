@@ -1261,17 +1261,26 @@ struct ContentView: View {
 
     private func restoreScrollPosition(proxy: ScrollViewProxy) {
         guard let path = fileURL?.path,
-              let savedPosition = ScrollPositionStore.shared.position(for: path) else { return }
+              let savedFraction = ScrollPositionStore.shared.position(for: path),
+              savedFraction > 0.01 else { return }
 
-        // Delay to allow content to render
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            // For now, just scroll to top - proper restoration would need custom scroll view
-            // This is a simplified implementation
-            if savedPosition > 0.1 {
-                // We can't easily scroll to a pixel offset in SwiftUI
-                // A more complete implementation would use NSScrollView directly
+        // Block heights are measured asynchronously, so DocumentHeightIndex may
+        // not be populated the instant the view appears. Poll a few times, then
+        // map the saved fraction to the nearest block and scroll to its anchor
+        // (the reader tags each row `.id("block-<index>")`).
+        func attempt(_ remaining: Int) {
+            let total = documentHeightIndex.totalHeight
+            guard total > 0 else {
+                if remaining > 0 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { attempt(remaining - 1) }
+                }
+                return
             }
+            let targetOffset = total * CGFloat(savedFraction)
+            let blockIdx = documentHeightIndex.blockIndex(atOffset: targetOffset)
+            proxy.scrollTo("block-\(blockIdx)", anchor: .top)
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { attempt(6) }
     }
 
     private func handleTaskToggle(id: UUID, newState: Bool) {

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// Stores and retrieves scroll positions per document.
 /// Uses UserDefaults with document path as key.
@@ -51,10 +52,13 @@ public final class ScrollPositionStore {
 
     // MARK: - Private
 
-    private func storageKey(for documentPath: String) -> String {
-        // Use a hash of the path for shorter keys
-        let hash = documentPath.hashValue
-        return "\(keyPrefix)\(hash)"
+    func storageKey(for documentPath: String) -> String {
+        // SHA256 of the path — a *stable* digest. The previous `hashValue` is
+        // seeded per process (Swift 4.2+), so keys changed every launch and a
+        // saved position could never be found again after restarting the app.
+        let digest = SHA256.hash(data: Data(documentPath.utf8))
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return "\(keyPrefix)\(hex)"
     }
 
     private func pruneOldEntriesIfNeeded() {
