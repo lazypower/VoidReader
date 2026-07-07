@@ -19,6 +19,12 @@ public struct FrontmatterData: Identifiable {
 /// Extracts YAML frontmatter from the top of a markdown document.
 public struct FrontmatterParser {
 
+    /// The closing `---` must appear within this many lines of the opener. Real
+    /// frontmatter is small; bounding the search stops a document that merely
+    /// opens with a `---` thematic break (with another `---` far below) from
+    /// having the whole region in between silently swallowed as frontmatter.
+    private static let maxScanLines = 50
+
     /// Result of parsing: the frontmatter (if any) and the remaining body.
     public struct Result {
         public var frontmatter: FrontmatterData?
@@ -45,7 +51,8 @@ public struct FrontmatterParser {
         }
 
         var closingIndex: Int?
-        for i in 1..<lines.count {
+        let scanLimit = min(lines.count, maxScanLines + 1)
+        for i in 1..<scanLimit {
             if lines[i].trimmingCharacters(in: .whitespaces) == "---" {
                 closingIndex = i
                 break

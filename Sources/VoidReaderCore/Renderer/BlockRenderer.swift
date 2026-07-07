@@ -61,7 +61,15 @@ public struct BlockRenderer {
     }
 
     /// Renders markdown text to an array of content blocks.
-    public static func render(_ text: String, style: MarkdownRenderer.Style = .init()) -> [MarkdownBlock] {
+    /// - Parameter isDocumentStart: True when `text` begins at byte 0 of the
+    ///   document. Frontmatter is only recognized then — never for a progressive
+    ///   chunk that happens to start with a `---` thematic break, which would
+    ///   otherwise be misread as a frontmatter fence and have content swallowed.
+    public static func render(
+        _ text: String,
+        style: MarkdownRenderer.Style = .init(),
+        isDocumentStart: Bool = true
+    ) -> [MarkdownBlock] {
         let charCount = text.count
         let byteCount = text.utf8.count
 
@@ -77,8 +85,11 @@ public struct BlockRenderer {
         )
 
         let allBlocks: [MarkdownBlock] = DebugLog.measure(.rendering, "BlockRenderer.render(\(charCount) chars)") {
-            // Extract frontmatter before any other processing
-            let fmResult = FrontmatterParser.parse(text)
+            // Extract frontmatter before any other processing — but only when
+            // this text is the true start of the document.
+            let fmResult = isDocumentStart
+                ? FrontmatterParser.parse(text)
+                : FrontmatterParser.Result(frontmatter: nil, body: text)
             let bodyText = fmResult.body
 
             // Pre-process to extract math blocks ($$...$$)
@@ -128,54 +139,90 @@ public struct BlockRenderer {
         case math(String)
     }
 
-    /// Extract $$...$$ math blocks from text, returning alternating segments
+    /// Extract $$...$$ math blocks from text, returning alternating segments.
+    ///
+    /// Fence-aware: a `$$` that falls on a fenced code line (shell `$$` PID,
+    /// `Makefile` `$$var`, a TeX example in a ```tex block) is left alone, so the
+    /// fence is never torn across two parses. Single pass over all matches — the
+    /// previous version reallocated the whole remainder string per match (O(n²)).
     private static func extractMathBlocks(from text: String) -> [ContentSegment] {
         // Fast path: if no $$ markers, skip regex entirely
         guard text.contains("$$") else {
             return [.markdown(text)]
         }
 
-        var segments: [ContentSegment] = []
-        var remaining = text
-        let pattern = "\\$\\$([\\s\\S]*?)\\$\\$"
-
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return [.markdown(text)]
+        let lines = text.components(separatedBy: "\n")
+        let fence = FenceMap(lines: lines)
+        let lineStarts = lineStartIndices(text)
+        func isFenced(_ idx: String.Index) -> Bool {
+            fence.isProtected(lineNumber(of: idx, in: lineStarts))
         }
 
-        while true {
-            let range = NSRange(remaining.startIndex..., in: remaining)
-            guard let match = regex.firstMatch(in: remaining, options: [], range: range) else {
-                // No more matches, add remaining text
-                if !remaining.isEmpty {
-                    segments.append(.markdown(remaining))
-                }
-                break
+        // Collect every `$$` delimiter, tagging those that fall on fenced lines.
+        // Pairing then ignores fenced delimiters entirely — crucially they are
+        // *skipped*, not consumed, so a real `$$…$$` following a fenced `$$`
+        // still pairs correctly instead of being swallowed by a cross-fence match.
+        var openers: [Range<String.Index>] = []
+        var searchStart = text.startIndex
+        while let delimiter = text.range(of: "$$", range: searchStart..<text.endIndex) {
+            if !isFenced(delimiter.lowerBound) {
+                openers.append(delimiter)
             }
+            searchStart = delimiter.upperBound
+        }
 
-            // Get the range of the full match and the capture group
-            guard let fullMatchRange = Range(match.range, in: remaining),
-                  let latexRange = Range(match.range(at: 1), in: remaining) else {
-                break
+        var segments: [ContentSegment] = []
+        var cursor = text.startIndex
+        var i = 0
+        while i + 1 < openers.count {
+            let open = openers[i]
+            let close = openers[i + 1]
+
+            if cursor < open.lowerBound {
+                segments.append(.markdown(String(text[cursor..<open.lowerBound])))
             }
-
-            // Add text before the match
-            let beforeMatch = String(remaining[..<fullMatchRange.lowerBound])
-            if !beforeMatch.isEmpty {
-                segments.append(.markdown(beforeMatch))
-            }
-
-            // Add the math block (trimmed)
-            let latex = String(remaining[latexRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let latex = String(text[open.upperBound..<close.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             if !latex.isEmpty {
                 segments.append(.math(latex))
             }
-
-            // Continue with remaining text
-            remaining = String(remaining[fullMatchRange.upperBound...])
+            cursor = close.upperBound
+            i += 2
         }
 
-        return segments
+        if cursor < text.endIndex {
+            segments.append(.markdown(String(text[cursor...])))
+        }
+
+        return segments.isEmpty ? [.markdown(text)] : segments
+    }
+
+    /// Byte-0 index of each line (line 0 starts at `startIndex`, each subsequent
+    /// line just after a `\n`). Line numbering matches `components(separatedBy:)`
+    /// and therefore ``FenceMap``.
+    private static func lineStartIndices(_ text: String) -> [String.Index] {
+        var starts = [text.startIndex]
+        var i = text.startIndex
+        while i < text.endIndex {
+            if text[i] == "\n" { starts.append(text.index(after: i)) }
+            i = text.index(after: i)
+        }
+        return starts
+    }
+
+    /// 0-based line number containing `idx`, via binary search over line starts.
+    private static func lineNumber(of idx: String.Index, in starts: [String.Index]) -> Int {
+        var lo = 0, hi = starts.count - 1, answer = 0
+        while lo <= hi {
+            let mid = (lo + hi) / 2
+            if starts[mid] <= idx {
+                answer = mid
+                lo = mid + 1
+            } else {
+                hi = mid - 1
+            }
+        }
+        return answer
     }
 }
 

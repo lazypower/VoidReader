@@ -654,7 +654,10 @@ struct ContentView: View {
 
             let moreBlocks = await DebugLog.measureAsync(.rendering, "Background render (\(remainingText.count) chars)") {
                 await Task.detached(priority: .userInitiated) {
-                    BlockRenderer.render(remainingText, style: style)
+                    // The background chunk starts mid-document, so frontmatter
+                    // must never be recognized here (a leading `---` is a
+                    // thematic break, not a fence).
+                    BlockRenderer.render(remainingText, style: style, isDocumentStart: false)
                 }.value
             }
 

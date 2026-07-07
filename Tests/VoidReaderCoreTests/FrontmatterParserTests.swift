@@ -44,6 +44,19 @@ struct FrontmatterParserTests {
         #expect(result.frontmatter == nil)
     }
 
+    @Test("Closing --- beyond the scan bound is not treated as frontmatter")
+    func boundedClosingFence() {
+        // A document that merely opens with a `---` thematic break, with the next
+        // `---` far below, must not have the whole region swallowed as frontmatter.
+        var lines = ["---", "key: value"]
+        for i in 0..<80 { lines.append("prose line \(i)") }
+        lines.append("---")
+        lines.append("real body")
+        let result = FrontmatterParser.parse(lines.joined(separator: "\n"))
+        #expect(result.frontmatter == nil)
+        #expect(result.body.contains("real body"))
+    }
+
     @Test("Returns nil for empty frontmatter block")
     func emptyBlock() {
         let input = """
