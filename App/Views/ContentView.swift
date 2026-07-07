@@ -933,22 +933,34 @@ struct ContentView: View {
         currentMatchIndex = currentMatchIndex == 0 ? searchMatches.count - 1 : currentMatchIndex - 1
     }
 
-    private func replaceCurrent() {
-        guard !searchText.isEmpty, !searchMatches.isEmpty else { return }
-
-        // Replace the current match in the document text
-        // We need to find the actual position in the raw text
-        let matches = TextSearcher.findMatches(
+    /// The raw-document matches a replace is allowed to touch: the ones outside
+    /// code fences, mirroring the prose universe the counter and highlights use.
+    /// When this set doesn't line up one-for-one with the displayed matches
+    /// (`searchMatches`), the two universes have diverged — a match in a table,
+    /// math block, or frontmatter — and we refuse rather than edit an occurrence
+    /// the user never saw highlighted.
+    private func replaceableMatches() -> [TextSearcher.Match]? {
+        let matches = TextSearcher.matchesOutsideFences(
             query: searchText,
             in: document.text,
             caseSensitive: caseSensitive,
             useRegex: useRegex
         )
-        guard currentMatchIndex < matches.count else { return }
+        guard matches.count == searchMatches.count else {
+            // Divergent universes — do not guess which occurrence to edit.
+            DebugLog.log(.rendering, "Replace refused: \(matches.count) editable vs \(searchMatches.count) displayed matches")
+            NSSound.beep()
+            return nil
+        }
+        return matches
+    }
 
-        let match = matches[currentMatchIndex]
+    private func replaceCurrent() {
+        guard !searchText.isEmpty, !searchMatches.isEmpty else { return }
+        guard let matches = replaceableMatches(), currentMatchIndex < matches.count else { return }
+
         var newText = document.text
-        newText.replaceSubrange(match.range, with: replaceText)
+        newText.replaceSubrange(matches[currentMatchIndex].range, with: replaceText)
         document.text = newText
 
         // Update search results
@@ -962,16 +974,10 @@ struct ContentView: View {
 
     private func replaceAll() {
         guard !searchText.isEmpty, !searchMatches.isEmpty else { return }
+        guard let matches = replaceableMatches() else { return }
 
         // Replace all occurrences (work backwards to preserve indices)
-        let matches = TextSearcher.findMatches(
-            query: searchText,
-            in: document.text,
-            caseSensitive: caseSensitive,
-            useRegex: useRegex
-        )
         var newText = document.text
-
         for match in matches.reversed() {
             newText.replaceSubrange(match.range, with: replaceText)
         }
@@ -1265,8 +1271,29 @@ struct ContentView: View {
         }
     }
 
-    private func handleTaskToggle(index: Int, newState: Bool) {
-        document.text = MarkdownTextUtils.toggleTask(in: document.text, at: index, to: newState)
+    private func handleTaskToggle(id: UUID, newState: Bool) {
+        // Map the tapped item's stable id to its ordinal among all rendered task
+        // slots (document order), then toggle that slot by source line. Walking
+        // renderedBlocks — the exact list the reader shows — keeps the ordinal in
+        // step with what the user clicked, across multiple task lists and mixed
+        // markers, instead of the old block-local index that addressed the wrong
+        // line whenever those diverged.
+        var ordinal = 0
+        for block in renderedBlocks {
+            guard case .taskList(let items) = block else { continue }
+            for item in items {
+                if item.id == id {
+                    document.text = MarkdownTextUtils.toggleTask(
+                        in: document.text,
+                        taskOrdinal: ordinal,
+                        expectedChecked: item.isChecked,
+                        to: newState
+                    )
+                    return
+                }
+                ordinal += 1
+            }
+        }
     }
 
     private func handleScrollProgress(_ percent: Int) {

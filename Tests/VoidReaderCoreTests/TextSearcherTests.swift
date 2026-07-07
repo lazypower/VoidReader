@@ -191,4 +191,62 @@ struct TextSearcherTests {
         #expect(matches.count == 1)
         #expect(String(text[matches[0].range]) == "cat")
     }
+
+    // MARK: - Fence-aware search (the §2.2 replace-safety universe)
+
+    @Test("Excludes matches inside fenced code blocks")
+    func excludesFencedMatches() {
+        let text = """
+        Call foo in prose.
+
+        ```swift
+        let foo = 1
+        foo()
+        ```
+
+        And foo again in prose.
+        """
+        // Raw search finds all four occurrences of "foo"...
+        #expect(TextSearcher.findMatches(query: "foo", in: text).count == 4)
+        // ...but only the two prose occurrences are editable.
+        let editable = TextSearcher.matchesOutsideFences(query: "foo", in: text)
+        #expect(editable.count == 2)
+        for match in editable {
+            #expect(String(text[match.range]) == "foo")
+        }
+    }
+
+    @Test("Prose-only matches are all editable and keep their ranges")
+    func proseMatchesAllEditable() {
+        let text = "alpha beta alpha gamma alpha"
+        let editable = TextSearcher.matchesOutsideFences(query: "alpha", in: text)
+        let raw = TextSearcher.findMatches(query: "alpha", in: text)
+        #expect(editable.count == 3)
+        #expect(editable.map { $0.range } == raw.map { $0.range })
+    }
+
+    @Test("Editable count equals displayed count when the query is only in prose + code")
+    func editableEqualsProseWhenCodePresent() {
+        // The common divergence-free case: a word in prose and code. The reader
+        // would count only the prose occurrence; matchesOutsideFences must agree.
+        let text = """
+        Use the widget helper.
+
+        ```
+        widget.build()
+        ```
+        """
+        #expect(TextSearcher.matchesOutsideFences(query: "widget", in: text).count == 1)
+    }
+
+    @Test("Match inside an unterminated fence is excluded")
+    func excludesUnterminatedFence() {
+        let text = """
+        prose token here
+
+        ```
+        token inside open fence
+        """
+        #expect(TextSearcher.matchesOutsideFences(query: "token", in: text).count == 1)
+    }
 }

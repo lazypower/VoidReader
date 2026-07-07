@@ -51,6 +51,29 @@ public struct TextSearcher {
         return matches
     }
 
+    /// Finds matches in `text` that lie **outside** fenced code blocks — the
+    /// set that a find/replace over rendered prose is permitted to edit.
+    ///
+    /// The reader searches and highlights only rendered prose blocks, never code
+    /// blocks; this mirrors that universe on the raw source so replacing a word
+    /// that also appears inside a code fence can never rewrite the code. Callers
+    /// compare this count against the displayed match count and refuse the edit
+    /// when they differ — a signal that the raw and rendered universes have
+    /// diverged (a match in a table, math block, frontmatter, or indented code)
+    /// and the correct occurrence can't be identified with confidence.
+    public static func matchesOutsideFences(
+        query: String,
+        in text: String,
+        caseSensitive: Bool = false,
+        useRegex: Bool = false
+    ) -> [Match] {
+        let matches = findMatches(query: query, in: text, caseSensitive: caseSensitive, useRegex: useRegex)
+        guard !matches.isEmpty else { return [] }
+
+        let fence = FenceMap(lines: text.components(separatedBy: "\n"))
+        return matches.filter { !fence.isProtected($0.lineNumber - 1) }
+    }
+
     /// Finds matches using regular expression.
     private static func findRegexMatches(
         query: String,
