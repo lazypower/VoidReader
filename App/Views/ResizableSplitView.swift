@@ -9,7 +9,11 @@ struct ResizableSplitView<Left: View, Right: View>: View {
     let minLeftFraction: CGFloat
     let maxLeftFraction: CGFloat
 
-    @State private var isDragging = false
+    /// The divider fraction captured at the start of a drag. `DragGesture`
+    /// reports translation cumulatively from the drag's start, so we must add it
+    /// to the *start* fraction — adding it to the already-updated `leftFraction`
+    /// each tick double-counts and makes the divider accelerate away.
+    @State private var dragStartFraction: CGFloat?
 
     init(
         leftFraction: Binding<CGFloat>,
@@ -45,12 +49,13 @@ struct ResizableSplitView<Left: View, Right: View>: View {
                     .gesture(
                         DragGesture()
                             .onChanged { value in
-                                isDragging = true
-                                let newFraction = (geo.size.width * leftFraction + value.translation.width) / geo.size.width
+                                let start = dragStartFraction ?? leftFraction
+                                if dragStartFraction == nil { dragStartFraction = start }
+                                let newFraction = (geo.size.width * start + value.translation.width) / geo.size.width
                                 leftFraction = min(max(newFraction, minLeftFraction), maxLeftFraction)
                             }
                             .onEnded { _ in
-                                isDragging = false
+                                dragStartFraction = nil
                             }
                     )
 
@@ -65,13 +70,34 @@ struct ResizableSplitView<Left: View, Right: View>: View {
 
 extension View {
     func cursor(_ cursor: NSCursor) -> some View {
-        self.onHover { hovering in
-            if hovering {
-                cursor.push()
-            } else {
-                NSCursor.pop()
+        modifier(HoverCursor(cursor: cursor))
+    }
+}
+
+/// Pushes a cursor while hovered and always balances the pop — including when
+/// the view disappears mid-hover, which the bare `onHover` push/pop leaked,
+/// leaving the resize cursor stuck.
+private struct HoverCursor: ViewModifier {
+    let cursor: NSCursor
+    @State private var pushed = false
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { hovering in
+                if hovering, !pushed {
+                    cursor.push()
+                    pushed = true
+                } else if !hovering, pushed {
+                    NSCursor.pop()
+                    pushed = false
+                }
             }
-        }
+            .onDisappear {
+                if pushed {
+                    NSCursor.pop()
+                    pushed = false
+                }
+            }
     }
 }
 

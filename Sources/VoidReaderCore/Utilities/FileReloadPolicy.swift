@@ -28,7 +28,12 @@ public enum ExternalChangeDetector {
             return .noChange
         }
 
-        return current > last ? .externalChange : .noChange
+        // Any difference in modification date is an external change — not just a
+        // *newer* one. `git checkout`, `cp -p`, and mtime-preserving editors can
+        // set an equal-or-older mtime; a strict `>` missed those and left the
+        // buffer silently stale. (An edit that preserves the mtime exactly still
+        // slips through; catching that needs size or content hashing — a follow-up.)
+        return current != last ? .externalChange : .noChange
     }
 }
 
@@ -45,6 +50,9 @@ public enum SaveConflictPolicy {
             // No baseline → cannot detect conflict → allow save.
             return true
         }
-        return current <= last
+        // Safe only if the file is exactly as we last observed it. `current <= last`
+        // used to green-light overwriting a *backdated* external change (e.g. a
+        // `git checkout` that restored an older mtime), silently clobbering it.
+        return current == last
     }
 }

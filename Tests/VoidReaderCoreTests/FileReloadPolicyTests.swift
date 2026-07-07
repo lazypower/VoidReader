@@ -37,14 +37,16 @@ struct ExternalChangeDetectorTests {
         #expect(r == .noChange)
     }
 
-    @Test("No change when disk date is older than last-known (clock skew / mtime reset)")
-    func noChangeWhenDiskOlder() {
+    @Test("Backdated disk date is an external change (cp -p, git checkout)")
+    func detectsBackdatedExternalChange() {
+        // A tool that restored an OLDER mtime still changed the file out from
+        // under us; a strict `>` used to miss this and leave the buffer stale.
         let r = ExternalChangeDetector.resolve(
             currentModDate: Self.t0,
             lastKnownModDate: Self.t1,
             isOwnSaveInProgress: false
         )
-        #expect(r == .noChange)
+        #expect(r == .externalChange)
     }
 
     @Test("No change when current modification date is missing")
@@ -83,9 +85,9 @@ struct SaveConflictPolicyTests {
         #expect(!SaveConflictPolicy.isSafeToSave(currentModDate: Self.t1, lastKnownModDate: Self.t0))
     }
 
-    @Test("Safe to save when disk is older than last observed")
-    func safeWhenDiskOlder() {
-        #expect(SaveConflictPolicy.isSafeToSave(currentModDate: Self.t0, lastKnownModDate: Self.t1))
+    @Test("Unsafe to save when disk is backdated (external change would be clobbered)")
+    func unsafeWhenDiskBackdated() {
+        #expect(!SaveConflictPolicy.isSafeToSave(currentModDate: Self.t0, lastKnownModDate: Self.t1))
     }
 
     @Test("Safe to save when current mod date is missing (no conflict detectable)")

@@ -46,6 +46,12 @@ struct SyntaxHighlightingEditor: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        // Refresh the coordinator's snapshot of this representable so the
+        // debounced rehighlight reads the LIVE theme/colorScheme/font. Without
+        // this the coordinator kept the launch-time copy, and the colors reverted
+        // to the old theme on the first keystroke after a theme change.
+        context.coordinator.parent = self
+
         guard let textView = scrollView.documentView as? NSTextView else { return }
 
         // Check if text changed externally
