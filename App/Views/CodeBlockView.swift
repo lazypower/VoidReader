@@ -85,6 +85,10 @@ struct CodeBlockView: View {
     @State private var cachedHighlight: AttributedString?
     @State private var cacheKey: String = ""
     @State private var requestSeq: Int = 0
+    /// Monotonic token for the measurement path (mirrors requestSeq for
+    /// highlighting) so a stale measurement whose request was superseded is
+    /// dropped. Read live through @State's backing box at completion time.
+    @State private var measurementSeq: Int = 0
     // Large-block path state: the authoritative (attributed, height) pair
     // delivered by the measurement cache. `nil` while measurement is in
     // flight (placeholder shown).
@@ -327,11 +331,17 @@ struct CodeBlockView: View {
             themeName: themeName
         )
 
+        measurementSeq &+= 1
+        let mySeq = measurementSeq
+
         // Fast cache-hit path: avoid dispatching anything if the prefetch
         // has already measured this block.
         Task {
             if let existing = await cache.get(key) {
-                await MainActor.run { measurement = existing }
+                await MainActor.run {
+                    guard mySeq == measurementSeq else { return }
+                    measurement = existing
+                }
                 return
             }
 
@@ -342,17 +352,12 @@ struct CodeBlockView: View {
                 fontSize: fontSize,
                 themeName: themeName,
                 cache: cache
-            ) { resultKey, result in
-                // Stale-result guard: if color scheme / font / content
-                // changed between dispatch and completion, the key will no
-                // longer match the view's current state — drop the result.
-                let currentKey = CodeBlockMeasurementKey(
-                    code: data.code,
-                    fontName: fontFamily ?? "",
-                    fontSize: fontSize,
-                    themeName: themeName
-                )
-                guard resultKey == currentKey else { return }
+            ) { _, result in
+                // Stale-result guard: if a newer measurement request superseded
+                // this one (content / font / theme changed), drop the result.
+                // The old code compared a key recomputed from the SAME captured
+                // values, so it was always equal and guarded nothing.
+                guard mySeq == measurementSeq else { return }
                 measurement = result
             }
         }

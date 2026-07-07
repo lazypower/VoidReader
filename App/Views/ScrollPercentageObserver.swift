@@ -37,6 +37,15 @@ private class ScrollObserverView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
 
+        // Drop any previous observer first — viewDidMoveToWindow can fire more
+        // than once (moving between windows, being removed), and re-adding
+        // without removing would stack duplicate observers on every move.
+        NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: nil)
+        guard window != nil else {
+            scrollView = nil
+            return
+        }
+
         // Find the enclosing scroll view
         var current: NSView? = superview
         while let view = current {
