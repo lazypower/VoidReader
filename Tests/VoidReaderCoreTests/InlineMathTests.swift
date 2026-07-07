@@ -147,6 +147,13 @@ final class InlineMathTests: XCTestCase {
         XCTAssertEqual(result[0].latex, "x^2")
     }
 
+    func testFormulaStartingWithDigit() {
+        // A digit right after the opener is fine — only the *closer* rule guards
+        // against currency. "$2+2$" and "$5x$" are math.
+        XCTAssertEqual(InlineMathParser.extract(from: "The sum $2+2$ is four")[0].latex, "2+2")
+        XCTAssertEqual(InlineMathParser.extract(from: "Area $5x$ units")[0].latex, "5x")
+    }
+
     func testNoMathAtAll() {
         let result = InlineMathParser.extract(from: "Just regular text here")
         XCTAssertEqual(result.count, 0)

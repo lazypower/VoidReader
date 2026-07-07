@@ -17,14 +17,16 @@ public struct InlineMathParser {
         // Pattern (pandoc-style inline math), left to right:
         // (?<![\\$])   - opening $ not escaped and not the 2nd $ of a $$ pair
         // \$           - literal opening $
-        // (?![$\s\d])  - opening delimiter must hug a non-space, non-digit char.
-        //                The non-digit rule is what keeps "$5 and $10" (currency)
-        //                from being read as math "$5 and $".
+        // (?![$\s])    - opening delimiter must hug a non-space char (a digit is
+        //                fine — "$2+2$" is math)
         // ([^$]+?)     - non-empty, non-greedy content (no $ inside)
-        // (?<!\s)      - closing delimiter must hug a non-space char
+        // (?<!\s)      - closing delimiter must hug a non-space char. This is what
+        //                keeps "$5 and $10" from parsing: the closer before "10"
+        //                has a space to its left.
         // \$           - literal closing $
-        // (?![$\d])    - closing $ not part of $$ and not immediately before a digit
-        let pattern = #"(?<![\\$])\$(?![$\s\d])([^$]+?)(?<!\s)\$(?![$\d])"#
+        // (?![$\d])    - closing $ not part of $$ and not immediately before a
+        //                digit ("$20,000 and $30,000" stays currency)
+        let pattern = #"(?<![\\$])\$(?![$\s])([^$]+?)(?<!\s)\$(?![$\d])"#
         return try? NSRegularExpression(pattern: pattern, options: [])
     }()
 

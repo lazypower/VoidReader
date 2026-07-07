@@ -171,6 +171,16 @@ public struct BlockRenderer {
             searchStart = delimiter.upperBound
         }
 
+        // True if a fenced line sits strictly between two positions — a math
+        // pair may not straddle a code fence (that would tear the fence and turn
+        // its contents into "math"). The endpoints are unfenced by construction.
+        func crossesFence(_ a: String.Index, _ b: String.Index) -> Bool {
+            let lo = lineNumber(of: a, in: lineStarts)
+            let hi = lineNumber(of: b, in: lineStarts)
+            guard hi > lo else { return false }
+            return ((lo + 1)..<hi).contains { fence.isProtected($0) }
+        }
+
         var segments: [ContentSegment] = []
         var cursor = text.startIndex
         var i = 0
@@ -178,12 +188,27 @@ public struct BlockRenderer {
             let open = openers[i]
             let close = openers[i + 1]
 
-            if cursor < open.lowerBound {
-                segments.append(.markdown(String(text[cursor..<open.lowerBound])))
+            // If this opener can't reach the next delimiter without crossing a
+            // fence, it's a stray `$$` — leave it as literal markdown and try the
+            // next delimiter as a fresh opener (advance by one, not two).
+            if crossesFence(open.upperBound, close.lowerBound) {
+                i += 1
+                continue
             }
+
             let latex = String(text[open.upperBound..<close.lowerBound])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !latex.isEmpty {
+
+            if latex.isEmpty {
+                // Empty `$$…$$` is not math — keep the delimiters as literal text
+                // instead of dropping them (no content loss).
+                if cursor < close.upperBound {
+                    segments.append(.markdown(String(text[cursor..<close.upperBound])))
+                }
+            } else {
+                if cursor < open.lowerBound {
+                    segments.append(.markdown(String(text[cursor..<open.lowerBound])))
+                }
                 segments.append(.math(latex))
             }
             cursor = close.upperBound

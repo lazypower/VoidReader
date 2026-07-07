@@ -58,6 +58,53 @@ struct MathAndChunkRenderTests {
         #expect(hasMathBlock(blocks))
     }
 
+    // MARK: - §4.1 pairing edge cases (codex round)
+
+    @Test("Empty $$ pairs are preserved as literal text, not dropped")
+    func emptyDollarPairsPreserved() {
+        let blocks = BlockRenderer.render("$$   $$\n\nBody stays here")
+        #expect(!hasMathBlock(blocks))
+        let allText = blocks.compactMap { block -> String? in
+            if case .text(let attr) = block { return String(attr.characters) } else { return nil }
+        }.joined()
+        #expect(allText.contains("Body stays here"))
+    }
+
+    @Test("A stray $$ before a fence swallows neither the fence nor the real math")
+    func strayDollarBeforeFence() {
+        let md = """
+        Intro stray $$
+
+        ```sh
+        echo $$
+        ```
+
+        $$E = mc^2$$
+        """
+        let blocks = BlockRenderer.render(md)
+        #expect(hasCodeBlock(blocks))
+        let math = blocks.compactMap { block -> String? in
+            if case .mathBlock(let data) = block { return data.latex } else { return nil }
+        }
+        #expect(math == ["E = mc^2"])
+    }
+
+    @Test("A $$ pair straddling a fenced block is not treated as math")
+    func pairStraddlingFenceIsNotMath() {
+        let md = """
+        $$
+
+        ```txt
+        literal code
+        ```
+
+        $$
+        """
+        let blocks = BlockRenderer.render(md)
+        #expect(!hasMathBlock(blocks))
+        #expect(hasCodeBlock(blocks))
+    }
+
     // MARK: - §4.2 frontmatter only at document start
 
     @Test("Leading --- in a mid-document chunk is not frontmatter")
