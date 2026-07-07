@@ -106,13 +106,20 @@ find "$APP_PATH" -name "*.appex" -type d | while read -r appex; do
     if [ -f "$appex_binary" ]; then
         codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$appex_binary"
     fi
-    # Sign the extension bundle
-    codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$appex"
+    # Sign the extension bundle WITH its entitlements. Without --entitlements,
+    # codesign embeds none — which strips the App Sandbox the Quick Look
+    # extension needs to load at all.
+    codesign --force --options runtime --timestamp \
+        --entitlements "QuickLookExtension/VoidReaderQuickLook.entitlements" \
+        --sign "$SIGNING_IDENTITY" "$appex"
 done
 
-# Sign the main app last
+# Sign the main app last, WITH its entitlements. The earlier re-sign dropped
+# every entitlement from shipped artifacts because --entitlements was absent.
 echo "  Signing main app..."
-codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP_PATH"
+codesign --force --options runtime --timestamp \
+    --entitlements "App/VoidReader.entitlements" \
+    --sign "$SIGNING_IDENTITY" "$APP_PATH"
 
 # Verify signature
 echo "Step 3/6: Verifying signature..."

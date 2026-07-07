@@ -66,14 +66,15 @@ project:
 	xcodegen generate
 	@echo "✓ Project generated"
 
-# Build (Debug)
-build:
+# Build (Debug) — regenerate the project first so the built app can never drift
+# from project.yml (e.g. a stale version string) on a local build.
+build: project
 	@echo "Building (Debug)..."
 	$(XCBUILD) -scheme VoidReader -configuration Debug build -quiet
 	@echo "✓ Build succeeded"
 
 # Build (Release)
-release:
+release: project
 	@echo "Building (Release)..."
 	$(XCBUILD) -scheme VoidReader -configuration Release build -quiet
 	@echo "✓ Release build succeeded"
@@ -161,12 +162,15 @@ run-debug-file: build
 	@echo "Tail with: tail -f /tmp/voidreader_debug.log"
 
 # Run tests (unit tests only)
+#
+# `swift test` is the authoritative run for core logic and fails the target on
+# any failure. The VoidReaderTests Xcode target compiles the same core test
+# sources against the app bundle, so running it here only duplicated the suite;
+# app/view compilation is already covered by `make build`. UI tests live under
+# `make test-ui`.
 test:
 	@echo "Running package tests..."
 	swift test
-	@echo ""
-	@echo "Running app tests..."
-	$(XCBUILD) -scheme VoidReader -configuration Debug test -only-testing:VoidReaderTests -quiet || true
 	@echo "✓ Tests complete"
 
 # Run UI tests
@@ -212,11 +216,11 @@ xcode: project
 	open VoidReader.xcodeproj
 
 # Build DMG for distribution (unsigned)
-dmg:
+dmg: project
 	@./scripts/build-dmg.sh
 
 # Build signed & notarized DMG
-dmg-signed:
+dmg-signed: project
 	@./scripts/build-signed-dmg.sh
 
 # Staple notarization ticket to existing DMG (after Apple approves)

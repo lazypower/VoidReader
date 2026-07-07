@@ -13,14 +13,27 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         self.view = NSView()
     }
 
+    /// Upper bound on the characters handed to the synchronous renderer. A Quick
+    /// Look preview must be fast and bounded; a multi-megabyte document is
+    /// truncated with a note rather than blocking the preview on a full parse.
+    private static let maxPreviewCharacters = 200_000
+
     func preparePreviewOfFile(at url: URL, completionHandler handler: @escaping (Error?) -> Void) {
         // Load the markdown file
         guard let data = try? Data(contentsOf: url),
-              let text = String(data: data, encoding: .utf8) else {
+              let fullText = String(data: data, encoding: .utf8) else {
             handler(NSError(domain: "VoidReader", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "Could not read markdown file"
             ]))
             return
+        }
+
+        let text: String
+        if fullText.count > Self.maxPreviewCharacters {
+            text = String(fullText.prefix(Self.maxPreviewCharacters))
+                + "\n\n---\n\n*Preview truncated — open in VoidReader to view the full document.*"
+        } else {
+            text = fullText
         }
 
         // Create the SwiftUI preview view
@@ -56,7 +69,6 @@ struct QuickLookPreviewView: View {
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(Color.purple.opacity(0.2)) // DEBUG: verify our extension loads
     }
 }
 
