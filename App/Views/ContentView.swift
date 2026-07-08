@@ -42,6 +42,8 @@ struct ContentView: View {
     @State private var cancellables = Set<AnyCancellable>()
 
     // For print/export/share/format commands
+    /// This document's own window, so print/export can act only when it's front.
+    @State private var hostWindow: NSWindow?
     private let printPublisher = NotificationCenter.default.publisher(for: .printDocument)
     private let exportPDFPublisher = NotificationCenter.default.publisher(for: .exportPDF)
     private let sharePublisher = NotificationCenter.default.publisher(for: .shareDocument)
@@ -253,6 +255,7 @@ struct ContentView: View {
         } message: {
             Text("This file has been modified by another application since you opened it. Overwrite with your changes?")
         }
+        .background(WindowAccessor { hostWindow = $0 })
         .onReceive(printPublisher) { _ in
             printDocument()
         }
@@ -292,12 +295,16 @@ struct ContentView: View {
     // MARK: - Print & Export
 
     private func printDocument() {
-        guard let window = NSApplication.shared.keyWindow else { return }
+        // Only the front (key) window's ContentView acts. The print/export
+        // commands post a GLOBAL notification that every open window receives,
+        // so without this each open document ran its own modal print panel —
+        // stacking unclosable grey dialogs that wedged the app.
+        guard let window = hostWindow, window.isKeyWindow else { return }
         DocumentPrinter.print(text: document.text, documentURL: fileURL, from: window)
     }
 
     private func exportPDF() {
-        guard let window = NSApplication.shared.keyWindow else { return }
+        guard let window = hostWindow, window.isKeyWindow else { return }
         // Use document title or fallback
         let suggestedName = fileURL?.deletingPathExtension().lastPathComponent ?? "Document"
         DocumentPrinter.exportPDF(text: document.text, documentURL: fileURL, suggestedName: suggestedName, from: window)
@@ -1055,8 +1062,21 @@ struct ContentView: View {
             case .ownSaveInProgress:
                 lastKnownModDate = url.fileModificationDate
             case .externalChange:
-                DispatchQueue.main.async {
-                    showExternalChangeAlert = true
+                // mtime changed — but confirm the on-disk CONTENT actually
+                // differs from our buffer before prompting. Our own writes (a
+                // task-checkbox toggle, format-on-save, an autosave) bump the
+                // mtime without diverging from what we already have, so a plain
+                // mtime check nagged "reload?" on every self-save. Only a genuine
+                // external edit (different content) should prompt — sparing by
+                // construction.
+                if let data = try? Data(contentsOf: url),
+                   let diskText = String(data: data, encoding: .utf8),
+                   diskText == document.text {
+                    lastKnownModDate = url.fileModificationDate
+                } else {
+                    DispatchQueue.main.async {
+                        showExternalChangeAlert = true
+                    }
                 }
             case .noChange:
                 break
