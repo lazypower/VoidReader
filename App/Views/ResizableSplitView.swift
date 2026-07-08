@@ -9,15 +9,8 @@ struct ResizableSplitView<Left: View, Right: View>: View {
     let minLeftFraction: CGFloat
     let maxLeftFraction: CGFloat
 
-    /// The divider fraction captured at the start of a drag. `DragGesture`
-    /// reports translation cumulatively from the drag's start, so we add it to
-    /// the *start* fraction — adding it to the already-updated `leftFraction`
-    /// each tick double-counts and makes the divider accelerate away.
-    ///
-    /// Held as `@GestureState` so it resets to `nil` automatically when the
-    /// gesture ends *or is cancelled/interrupted* — a plain `@State` cleared only
-    /// in `onEnded` could keep a stale anchor and make the next drag jump.
-    @GestureState private var dragAnchorFraction: CGFloat?
+    /// Fixed coordinate space the divider drag is measured in.
+    private static var coordinateSpace: String { "ResizableSplitView" }
 
     init(
         leftFraction: Binding<CGFloat>,
@@ -51,22 +44,23 @@ struct ResizableSplitView<Left: View, Right: View>: View {
                             .cursor(.resizeLeftRight)
                     )
                     .gesture(
-                        DragGesture()
-                            .updating($dragAnchorFraction) { _, anchor, _ in
-                                // Captured once at gesture start (leftFraction is
-                                // still the pre-drag value here); auto-resets on end.
-                                if anchor == nil { anchor = leftFraction }
-                            }
+                        // Track the cursor's ABSOLUTE x in the fixed container
+                        // coordinate space, not translation in the divider's own
+                        // (moving) space. As the divider moves with leftFraction,
+                        // a local/translation gesture re-references itself every
+                        // tick — that feedback is what made the divider shudder and
+                        // snap to the clamp edges. Absolute position doesn't feed back.
+                        DragGesture(coordinateSpace: .named(Self.coordinateSpace))
                             .onChanged { value in
-                                let start = dragAnchorFraction ?? leftFraction
-                                let newFraction = (geo.size.width * start + value.translation.width) / geo.size.width
-                                leftFraction = min(max(newFraction, minLeftFraction), maxLeftFraction)
+                                let fraction = value.location.x / geo.size.width
+                                leftFraction = min(max(fraction, minLeftFraction), maxLeftFraction)
                             }
                     )
 
                 right
                     .frame(maxWidth: .infinity)
             }
+            .coordinateSpace(name: Self.coordinateSpace)
         }
     }
 }
