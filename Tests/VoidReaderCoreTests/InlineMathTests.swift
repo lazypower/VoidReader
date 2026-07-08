@@ -117,10 +117,41 @@ final class InlineMathTests: XCTestCase {
         XCTAssertEqual(result.count, 0, "Ambiguous $a$$b$ should not match")
     }
 
-    func testInlineMathWithSpaces() {
-        let result = InlineMathParser.extract(from: "$ x $ with spaces")
+    func testDelimitersMustHugNonSpace() {
+        // Pandoc/KaTeX rule: a delimiter immediately wrapping whitespace is not
+        // inline math. (Previously "$ x $" was matched; that was too lenient.)
+        XCTAssertEqual(InlineMathParser.extract(from: "$ x $ with spaces").count, 0)
+        XCTAssertEqual(InlineMathParser.extract(from: "open $x $ close").count, 0)
+        XCTAssertEqual(InlineMathParser.extract(from: "open $ x$ close").count, 0)
+    }
+
+    func testInternalSpacesAreFine() {
+        // Spaces WITHIN the content are fine as long as the delimiters hug non-space.
+        let result = InlineMathParser.extract(from: "$a + b$ is math")
         XCTAssertEqual(result.count, 1)
-        XCTAssertEqual(result[0].latex, " x ")
+        XCTAssertEqual(result[0].latex, "a + b")
+    }
+
+    // MARK: - Currency false positives (§4.7)
+
+    func testDollarAmountsAreNotMath() {
+        // "Costs $5 and $10 total" must not read "5 and " as math.
+        XCTAssertEqual(InlineMathParser.extract(from: "Costs $5 and $10 total").count, 0)
+        XCTAssertEqual(InlineMathParser.extract(from: "It was $100, then $250.").count, 0)
+    }
+
+    func testCurrencyMixedWithRealMath() {
+        // A price and a real formula in the same line: only the formula matches.
+        let result = InlineMathParser.extract(from: "It costs $5 but $x^2$ is the math")
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].latex, "x^2")
+    }
+
+    func testFormulaStartingWithDigit() {
+        // A digit right after the opener is fine — only the *closer* rule guards
+        // against currency. "$2+2$" and "$5x$" are math.
+        XCTAssertEqual(InlineMathParser.extract(from: "The sum $2+2$ is four")[0].latex, "2+2")
+        XCTAssertEqual(InlineMathParser.extract(from: "Area $5x$ units")[0].latex, "5x")
     }
 
     func testNoMathAtAll() {

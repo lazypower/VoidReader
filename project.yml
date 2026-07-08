@@ -61,7 +61,7 @@ targets:
             LSHandlerRank: Default
             LSItemContentTypes:
               - net.daringfireball.markdown
-              - public.text
+              - public.plain-text
             NSDocumentClass: $(PRODUCT_MODULE_NAME).MarkdownDocument
         UTImportedTypeDeclarations:
           - UTTypeIdentifier: net.daringfireball.markdown
@@ -107,7 +107,6 @@ targets:
             QLSupportsSearchableItems: false
             QLSupportedContentTypes:
               - net.daringfireball.markdown
-              - public.plain-text
 
   VoidReaderTests:
     type: bundle.unit-test

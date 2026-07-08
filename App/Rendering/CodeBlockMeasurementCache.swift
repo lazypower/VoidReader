@@ -115,10 +115,10 @@ enum CodeBlockMeasurement {
     /// Maximum code size for which we attempt syntax highlighting. Above
     /// this, the measurement still runs (we need the authoritative height)
     /// but the attributed result is `nil` — the renderer will produce a
-    /// plain attributed string at render time. This matches
-    /// `CodeBlockView.maxHighlightChars` and exists here so the measurer
-    /// can make the decision without crossing back to the main actor.
-    static let maxHighlightChars = 1_000_000
+    /// plain attributed string at render time. Reads the single
+    /// `RenderingThresholds` authority (shared with `CodeBlockView`) so the
+    /// measurer can decide without crossing back to the main actor.
+    static let maxHighlightChars = RenderingThresholds.maxHighlightChars
 
     static func measure(
         code: String,

@@ -42,6 +42,8 @@ struct ContentView: View {
     @State private var cancellables = Set<AnyCancellable>()
 
     // For print/export/share/format commands
+    /// This document's own window, so print/export can act only when it's front.
+    @State private var hostWindow: NSWindow?
     private let printPublisher = NotificationCenter.default.publisher(for: .printDocument)
     private let exportPDFPublisher = NotificationCenter.default.publisher(for: .exportPDF)
     private let sharePublisher = NotificationCenter.default.publisher(for: .shareDocument)
@@ -52,7 +54,7 @@ struct ContentView: View {
     @State private var showingShare = false
 
     // Scroll position tracking
-    @State private var scrollOffset: CGFloat = 0
+    @State private var hasRestoredScroll = false
     @State private var contentHeight: CGFloat = 0
     @State private var visibleHeight: CGFloat = 0
     @State private var scrollProxy: ScrollViewProxy?
@@ -253,6 +255,7 @@ struct ContentView: View {
         } message: {
             Text("This file has been modified by another application since you opened it. Overwrite with your changes?")
         }
+        .background(WindowAccessor { hostWindow = $0 })
         .onReceive(printPublisher) { _ in
             printDocument()
         }
@@ -292,12 +295,16 @@ struct ContentView: View {
     // MARK: - Print & Export
 
     private func printDocument() {
-        guard let window = NSApplication.shared.keyWindow else { return }
+        // Only the front (key) window's ContentView acts. The print/export
+        // commands post a GLOBAL notification that every open window receives,
+        // so without this each open document ran its own modal print panel —
+        // stacking unclosable grey dialogs that wedged the app.
+        guard let window = hostWindow, window.isKeyWindow else { return }
         DocumentPrinter.print(text: document.text, documentURL: fileURL, from: window)
     }
 
     private func exportPDF() {
-        guard let window = NSApplication.shared.keyWindow else { return }
+        guard let window = hostWindow, window.isKeyWindow else { return }
         // Use document title or fallback
         let suggestedName = fileURL?.deletingPathExtension().lastPathComponent ?? "Document"
         DocumentPrinter.exportPDF(text: document.text, documentURL: fileURL, suggestedName: suggestedName, from: window)
@@ -535,7 +542,7 @@ struct ContentView: View {
 
     private func updateHeadings(from text: String) {
         // For small documents, parse synchronously
-        if text.count < 50_000 {
+        if text.count < RenderingThresholds.syncRenderMaxChars {
             let doc = MarkdownParser.parse(text)
             headings = MarkdownParser.extractHeadings(from: doc)
             return
@@ -575,7 +582,7 @@ struct ContentView: View {
         let renderingSignposter = Signposts.signposter(for: .rendering)
 
         // For small documents, render synchronously to avoid flicker
-        if text.count < 50_000 {
+        if text.count < RenderingThresholds.syncRenderMaxChars {
             DebugLog.log(.rendering, "updateRenderedBlocks: sync path (\(text.count) chars)")
             // Signpost: renderBatch index=0 — sync path is one batch covering the full doc.
             // parseMarkdown nests inside this interval (BlockRenderer.render emits it).
@@ -654,7 +661,10 @@ struct ContentView: View {
 
             let moreBlocks = await DebugLog.measureAsync(.rendering, "Background render (\(remainingText.count) chars)") {
                 await Task.detached(priority: .userInitiated) {
-                    BlockRenderer.render(remainingText, style: style)
+                    // The background chunk starts mid-document, so frontmatter
+                    // must never be recognized here (a leading `---` is a
+                    // thematic break, not a fence).
+                    BlockRenderer.render(remainingText, style: style, isDocumentStart: false)
                 }.value
             }
 
@@ -933,22 +943,34 @@ struct ContentView: View {
         currentMatchIndex = currentMatchIndex == 0 ? searchMatches.count - 1 : currentMatchIndex - 1
     }
 
-    private func replaceCurrent() {
-        guard !searchText.isEmpty, !searchMatches.isEmpty else { return }
-
-        // Replace the current match in the document text
-        // We need to find the actual position in the raw text
-        let matches = TextSearcher.findMatches(
+    /// The raw-document matches a replace is allowed to touch: the ones outside
+    /// code fences, mirroring the prose universe the counter and highlights use.
+    /// When this set doesn't line up one-for-one with the displayed matches
+    /// (`searchMatches`), the two universes have diverged — a match in a table,
+    /// math block, or frontmatter — and we refuse rather than edit an occurrence
+    /// the user never saw highlighted.
+    private func replaceableMatches() -> [TextSearcher.Match]? {
+        let matches = TextSearcher.matchesOutsideFences(
             query: searchText,
             in: document.text,
             caseSensitive: caseSensitive,
             useRegex: useRegex
         )
-        guard currentMatchIndex < matches.count else { return }
+        guard matches.count == searchMatches.count else {
+            // Divergent universes — do not guess which occurrence to edit.
+            DebugLog.log(.rendering, "Replace refused: \(matches.count) editable vs \(searchMatches.count) displayed matches")
+            NSSound.beep()
+            return nil
+        }
+        return matches
+    }
 
-        let match = matches[currentMatchIndex]
+    private func replaceCurrent() {
+        guard !searchText.isEmpty, !searchMatches.isEmpty else { return }
+        guard let matches = replaceableMatches(), currentMatchIndex < matches.count else { return }
+
         var newText = document.text
-        newText.replaceSubrange(match.range, with: replaceText)
+        newText.replaceSubrange(matches[currentMatchIndex].range, with: replaceText)
         document.text = newText
 
         // Update search results
@@ -962,16 +984,10 @@ struct ContentView: View {
 
     private func replaceAll() {
         guard !searchText.isEmpty, !searchMatches.isEmpty else { return }
+        guard let matches = replaceableMatches() else { return }
 
         // Replace all occurrences (work backwards to preserve indices)
-        let matches = TextSearcher.findMatches(
-            query: searchText,
-            in: document.text,
-            caseSensitive: caseSensitive,
-            useRegex: useRegex
-        )
         var newText = document.text
-
         for match in matches.reversed() {
             newText.replaceSubrange(match.range, with: replaceText)
         }
@@ -1046,8 +1062,21 @@ struct ContentView: View {
             case .ownSaveInProgress:
                 lastKnownModDate = url.fileModificationDate
             case .externalChange:
-                DispatchQueue.main.async {
-                    showExternalChangeAlert = true
+                // mtime changed — but confirm the on-disk CONTENT actually
+                // differs from our buffer before prompting. Our own writes (a
+                // task-checkbox toggle, format-on-save, an autosave) bump the
+                // mtime without diverging from what we already have, so a plain
+                // mtime check nagged "reload?" on every self-save. Only a genuine
+                // external edit (different content) should prompt — sparing by
+                // construction.
+                if let data = try? Data(contentsOf: url),
+                   let diskText = String(data: data, encoding: .utf8),
+                   diskText == document.text {
+                    lastKnownModDate = url.fileModificationDate
+                } else {
+                    DispatchQueue.main.async {
+                        showExternalChangeAlert = true
+                    }
                 }
             case .noChange:
                 break
@@ -1199,12 +1228,15 @@ struct ContentView: View {
             }
             .onAppear {
                 scrollProxy = proxy
+                // Small/sync documents never toggle isRendering, so also try to
+                // restore here; the hasRestoredScroll guard keeps it to once.
+                restoreScrollPosition(proxy: proxy)
             }
             .onDisappear {
                 saveScrollPosition()
             }
             .onChange(of: isRendering) { _, newValue in
-                // Restore scroll position after rendering completes
+                // Restore scroll position after progressive rendering completes.
                 if !newValue && !renderedBlocks.isEmpty {
                     restoreScrollPosition(proxy: proxy)
                 }
@@ -1245,28 +1277,68 @@ struct ContentView: View {
 
     private func saveScrollPosition() {
         guard let path = fileURL?.path else { return }
-        // Save normalized position (0-1)
-        let normalized = contentHeight > 0 ? scrollOffset / contentHeight : 0
-        ScrollPositionStore.shared.savePosition(normalized, for: path)
+        // Save the fraction using the LIVE scroll offset (scrollOffsetForPercent,
+        // the one the observer actually updates) over the authoritative
+        // DocumentHeightIndex.totalHeight — the same coordinate space restore
+        // uses. The old code divided a never-updated `scrollOffset` by the SwiftUI
+        // contentHeight, so it saved 0 for every document.
+        let total = documentHeightIndex.totalHeight
+        let fraction = total > 0 ? min(max(Double(scrollOffsetForPercent / total), 0), 1) : 0
+        ScrollPositionStore.shared.savePosition(fraction, for: path)
     }
 
     private func restoreScrollPosition(proxy: ScrollViewProxy) {
-        guard let path = fileURL?.path,
-              let savedPosition = ScrollPositionStore.shared.position(for: path) else { return }
+        guard !hasRestoredScroll,
+              let path = fileURL?.path,
+              let savedFraction = ScrollPositionStore.shared.position(for: path),
+              savedFraction > 0.01 else { return }
 
-        // Delay to allow content to render
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            // For now, just scroll to top - proper restoration would need custom scroll view
-            // This is a simplified implementation
-            if savedPosition > 0.1 {
-                // We can't easily scroll to a pixel offset in SwiftUI
-                // A more complete implementation would use NSScrollView directly
+        // Block heights are measured asynchronously, so DocumentHeightIndex may
+        // not be populated the instant the view appears. Poll a few times, then
+        // map the saved fraction to the nearest block and scroll to its anchor
+        // (the reader tags each row `.id("block-<index>")`).
+        func attempt(_ remaining: Int) {
+            // Don't yank the user if they've already scrolled away from the top.
+            guard scrollOffsetForPercent < 50 else { hasRestoredScroll = true; return }
+
+            let total = documentHeightIndex.totalHeight
+            guard total > 0 else {
+                if remaining > 0 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { attempt(remaining - 1) }
+                }
+                return
             }
+            hasRestoredScroll = true
+            let targetOffset = total * CGFloat(savedFraction)
+            let blockIdx = documentHeightIndex.blockIndex(atOffset: targetOffset)
+            proxy.scrollTo("block-\(blockIdx)", anchor: .top)
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { attempt(6) }
     }
 
-    private func handleTaskToggle(index: Int, newState: Bool) {
-        document.text = MarkdownTextUtils.toggleTask(in: document.text, at: index, to: newState)
+    private func handleTaskToggle(id: UUID, newState: Bool) {
+        // Map the tapped item's stable id to its ordinal among all rendered task
+        // slots (document order), then toggle that slot by source line. Walking
+        // renderedBlocks — the exact list the reader shows — keeps the ordinal in
+        // step with what the user clicked, across multiple task lists and mixed
+        // markers, instead of the old block-local index that addressed the wrong
+        // line whenever those diverged.
+        var ordinal = 0
+        for block in renderedBlocks {
+            guard case .taskList(let items) = block else { continue }
+            for item in items {
+                if item.id == id {
+                    document.text = MarkdownTextUtils.toggleTask(
+                        in: document.text,
+                        taskOrdinal: ordinal,
+                        expectedChecked: item.isChecked,
+                        to: newState
+                    )
+                    return
+                }
+                ordinal += 1
+            }
+        }
     }
 
     private func handleScrollProgress(_ percent: Int) {

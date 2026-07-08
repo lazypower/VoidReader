@@ -22,8 +22,9 @@ DerivedData/
 
 # Swift Package Manager
 .swiftpm/
-Package.resolved
 Packages/
+# Package.resolved is committed on purpose — an app should pin its dependency
+# graph so CI and releases build against the same swift-markdown/Highlightr.
 
 # CocoaPods (if ever used)
 Pods/

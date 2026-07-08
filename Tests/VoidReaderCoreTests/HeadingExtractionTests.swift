@@ -159,4 +159,24 @@ struct HeadingExtractionTests {
         let ids = Set(headings.map { $0.id })
         #expect(ids.count == 3) // All unique
     }
+
+    @Test("Duplicate heading texts get unique GitHub-style slugs")
+    func dedupesSlugs() {
+        let doc = MarkdownParser.parse("# Overview\n\n## Overview\n\n## Overview")
+        let headings = MarkdownParser.extractHeadings(from: doc)
+        #expect(headings.count == 3)
+        #expect(headings[0].slug == "overview")
+        #expect(headings[1].slug == "overview-1")
+        #expect(headings[2].slug == "overview-2")
+    }
+
+    @Test("A heading whose base slug collides with a dedup suffix stays unique")
+    func slugSuffixCollisionStaysUnique() {
+        // "Overview 1" base-slugs to "overview-1", which the 2nd "Overview"
+        // already took; it must not produce a duplicate, unreachable anchor.
+        let doc = MarkdownParser.parse("# Overview\n\n# Overview\n\n# Overview 1")
+        let slugs = MarkdownParser.extractHeadings(from: doc).map(\.slug)
+        #expect(slugs == ["overview", "overview-1", "overview-1-1"])
+        #expect(Set(slugs).count == slugs.count) // all unique
+    }
 }

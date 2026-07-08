@@ -14,17 +14,19 @@ public struct InlineMathParser {
 
     // Cached regex for performance - compiled once, reused
     private static let mathRegex: NSRegularExpression? = {
-        // Pattern explanation:
-        // (?<!\\)     - Negative lookbehind: not preceded by backslash (escaped)
-        // (?<!\$)     - Negative lookbehind: not preceded by $ (would be $$)
-        // \$          - Literal opening $
-        // (?!\$)      - Negative lookahead: not followed by $ (would be $$)
-        // ([^$]+?)    - Capture group: one or more non-$ characters (non-greedy)
-        // \$          - Literal closing $
-        // (?!\$)      - Negative lookahead: closing $ not followed by $ (would be $$)
-        //
-        // This ensures we match $x$ but not $$x$$ or $$ or \$
-        let pattern = #"(?<!\\)(?<!\$)\$(?!\$)([^$]+?)\$(?!\$)"#
+        // Pattern (pandoc-style inline math), left to right:
+        // (?<![\\$])   - opening $ not escaped and not the 2nd $ of a $$ pair
+        // \$           - literal opening $
+        // (?![$\s])    - opening delimiter must hug a non-space char (a digit is
+        //                fine — "$2+2$" is math)
+        // ([^$]+?)     - non-empty, non-greedy content (no $ inside)
+        // (?<!\s)      - closing delimiter must hug a non-space char. This is what
+        //                keeps "$5 and $10" from parsing: the closer before "10"
+        //                has a space to its left.
+        // \$           - literal closing $
+        // (?![$\d])    - closing $ not part of $$ and not immediately before a
+        //                digit ("$20,000 and $30,000" stays currency)
+        let pattern = #"(?<![\\$])\$(?![$\s])([^$]+?)(?<!\s)\$(?![$\d])"#
         return try? NSRegularExpression(pattern: pattern, options: [])
     }()
 
@@ -60,23 +62,9 @@ public struct InlineMathParser {
             }
 
             let latex = String(text[contentRange])
-
-            // Additional safety check: ensure we're not part of a $$ sequence
-            // Check character before our match (if exists)
-            if fullRange.lowerBound > text.startIndex {
-                let beforeIndex = text.index(before: fullRange.lowerBound)
-                if text[beforeIndex] == "$" {
-                    continue  // Skip - this is part of $$
-                }
-            }
-
-            // Check character after our match (if exists)
-            if fullRange.upperBound < text.endIndex {
-                if text[fullRange.upperBound] == "$" {
-                    continue  // Skip - this is part of $$
-                }
-            }
-
+            // The $$-adjacency the old code re-checked here is already guaranteed
+            // by the (?<![\\$]) / (?![$\d]) lookarounds in the pattern, so the
+            // post-hoc checks were dead code and have been removed.
             matches.append(Match(latex: latex, range: fullRange))
         }
 

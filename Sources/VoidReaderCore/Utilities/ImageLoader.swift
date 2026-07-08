@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import CryptoKit
 
 /// Handles image loading with path resolution and caching.
 public actor ImageLoader {
@@ -132,6 +133,8 @@ public actor ImageLoader {
 
                 return (NSImage(data: data), data.count)
             } catch {
+                // Leave a breadcrumb instead of swallowing the failure silently.
+                DebugLog.log(.rendering, "Image fetch failed for \(url.absoluteString): \(error.localizedDescription)")
                 return (nil, 0)
             }
         }
@@ -146,6 +149,9 @@ public actor ImageLoader {
 /// Disk-backed image cache.
 actor ImageCache {
     private var memoryCache: [String: NSImage] = [:]
+    /// Keys in least-recently-used order (oldest first) so eviction drops the
+    /// coldest entry rather than an arbitrary dictionary-order one.
+    private var lruOrder: [String] = []
     private let cacheDirectory: URL
     private let maxMemoryCacheCount = 50
     private let cacheExpiration: TimeInterval = 24 * 60 * 60 // 24 hours
@@ -174,6 +180,7 @@ actor ImageCache {
 
         // Check memory cache
         if let image = memoryCache[key] {
+            touchLRU(key)
             return image
         }
 
@@ -217,16 +224,26 @@ actor ImageCache {
     /// Clears the cache.
     func clear() {
         memoryCache.removeAll()
+        lruOrder.removeAll()
         try? FileManager.default.removeItem(at: cacheDirectory)
         try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
     }
 
     private func storeInMemory(_ image: NSImage, for key: String) {
-        // Evict oldest if at capacity
-        if memoryCache.count >= maxMemoryCacheCount {
-            memoryCache.removeValue(forKey: memoryCache.keys.first!)
+        // Evict the least-recently-used entry if inserting a new key at capacity.
+        if memoryCache[key] == nil, memoryCache.count >= maxMemoryCacheCount,
+           let oldest = lruOrder.first {
+            lruOrder.removeFirst()
+            memoryCache.removeValue(forKey: oldest)
         }
         memoryCache[key] = image
+        touchLRU(key)
+    }
+
+    /// Marks `key` as most-recently-used.
+    private func touchLRU(_ key: String) {
+        lruOrder.removeAll { $0 == key }
+        lruOrder.append(key)
     }
 
     private func storeToDisk(_ image: NSImage, for key: String) {
@@ -281,11 +298,14 @@ actor ImageCache {
     }
 
     private func cacheFileURL(for key: String) -> URL {
-        // Hash the key to create a valid filename
-        let hash = key.data(using: .utf8)!.base64EncodedString()
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "+", with: "-")
-            .prefix(64)
-        return cacheDirectory.appendingPathComponent(String(hash) + ".png")
+        cacheDirectory.appendingPathComponent(Self.diskFileName(for: key))
+    }
+
+    /// Full-key SHA256 filename. The old base64(key).prefix(64) truncation meant
+    /// only the first ~48 bytes of the URL participated, so CDN URLs that differ
+    /// near the end collided and served the wrong cached image.
+    static func diskFileName(for key: String) -> String {
+        let digest = SHA256.hash(data: Data(key.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined() + ".png"
     }
 }

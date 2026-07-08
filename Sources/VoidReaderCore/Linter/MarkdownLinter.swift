@@ -14,6 +14,7 @@ public struct MarkdownLinter {
         MD026TrailingPunctuation(),
         MD031BlankLinesAroundCodeBlocks(),
         MD049ConsistentEmphasis(),
+        MD050ConsistentStrong(),
     ]
 
     /// Lints markdown text and returns warnings.

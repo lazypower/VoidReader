@@ -99,37 +99,53 @@ final class ImageLoaderTests: XCTestCase {
 final class ImageCacheTests: XCTestCase {
 
     func testCacheKeyGeneration() {
-        // Cache keys should be filesystem-safe
-        let url = "https://example.com/path/to/image.png?query=1&other=2"
-        let key = generateCacheKey(for: url)
-
+        // Cache keys should be filesystem-safe.
+        let key = ImageCache.diskFileName(for: "https://example.com/path/to/image.png?query=1&other=2")
         XCTAssertFalse(key.contains("/"), "Cache key should not contain slashes")
         XCTAssertFalse(key.contains("?"), "Cache key should not contain query chars")
         XCTAssertTrue(key.hasSuffix(".png"), "Cache key should have .png extension")
     }
 
     func testCacheKeyDeterministic() {
-        let url = "https://example.com/image.png"
-        let key1 = generateCacheKey(for: url)
-        let key2 = generateCacheKey(for: url)
-        XCTAssertEqual(key1, key2, "Same URL should produce same cache key")
+        XCTAssertEqual(
+            ImageCache.diskFileName(for: "https://example.com/image.png"),
+            ImageCache.diskFileName(for: "https://example.com/image.png")
+        )
     }
 
     func testCacheKeyUnique() {
-        let url1 = "https://example.com/image1.png"
-        let url2 = "https://example.com/image2.png"
-        let key1 = generateCacheKey(for: url1)
-        let key2 = generateCacheKey(for: url2)
-        XCTAssertNotEqual(key1, key2, "Different URLs should produce different cache keys")
+        XCTAssertNotEqual(
+            ImageCache.diskFileName(for: "https://example.com/image1.png"),
+            ImageCache.diskFileName(for: "https://example.com/image2.png")
+        )
     }
 
-    // MARK: - Helper (mirrors ImageCache logic)
+    func testCacheKeyNoCollisionForLongURLsDifferingAtEnd() {
+        // The old base64(url).prefix(64) truncation collided when URLs shared a
+        // long prefix and differed only near the end (common for CDN paths).
+        let base = String(repeating: "a", count: 200)
+        let k1 = ImageCache.diskFileName(for: "https://cdn.example.com/\(base)/one.png")
+        let k2 = ImageCache.diskFileName(for: "https://cdn.example.com/\(base)/two.png")
+        XCTAssertNotEqual(k1, k2, "Long URLs differing only at the end must not collide")
+    }
 
-    private func generateCacheKey(for key: String) -> String {
-        let hash = key.data(using: .utf8)!.base64EncodedString()
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "+", with: "-")
-            .prefix(64)
-        return String(hash) + ".png"
+    func testLRUEvictsColdestEntryNotArbitrary() async {
+        let cache = ImageCache()
+        await cache.clear()
+        let img = NSImage(size: NSSize(width: 1, height: 1))
+
+        // Fill memory to capacity (50), memory-only so nothing hits disk.
+        for i in 0..<50 { await cache.store(img, for: "key-\(i)", isRemote: false) }
+        // Touch key-0 so it becomes most-recently-used (key-1 is now the coldest).
+        _ = await cache.image(for: "key-0")
+        // Insert one more → eviction should drop key-1, not the touched key-0.
+        await cache.store(img, for: "key-new", isRemote: false)
+
+        let key0 = await cache.image(for: "key-0")
+        let key1 = await cache.image(for: "key-1")
+        XCTAssertNotNil(key0, "Recently-touched key-0 should survive eviction")
+        XCTAssertNil(key1, "The coldest entry (key-1) should have been evicted")
+
+        await cache.clear()
     }
 }

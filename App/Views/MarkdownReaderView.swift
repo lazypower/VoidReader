@@ -9,7 +9,7 @@ struct MarkdownReaderView: View {
     var documentURL: URL? = nil
     var codeFontSize: CGFloat = 13
     var codeFontFamily: String? = nil
-    var onTaskToggle: ((Int, Bool) -> Void)?
+    var onTaskToggle: ((UUID, Bool) -> Void)?
     var onMermaidExpand: ((String) -> Void)?
 
     var body: some View {
@@ -162,7 +162,7 @@ struct MarkdownReaderViewWithAnchors: View {
     var currentMatchIndex: Int = 0
     var codeFontSize: CGFloat = 13
     var codeFontFamily: String? = nil
-    var onTaskToggle: ((Int, Bool) -> Void)?
+    var onTaskToggle: ((UUID, Bool) -> Void)?
     var onTopBlockChange: ((Int) -> Void)?
     var onScrollProgress: ((Int) -> Void)?  // Reports percent read (0-100)
     var onMermaidExpand: ((String) -> Void)?
@@ -458,7 +458,7 @@ private struct ChunkView: View {
     var currentMatchIndex: Int = 0
     var codeFontSize: CGFloat = 13
     var codeFontFamily: String? = nil
-    var onTaskToggle: ((Int, Bool) -> Void)?
+    var onTaskToggle: ((UUID, Bool) -> Void)?
     var onMermaidExpand: ((String) -> Void)?
 
     /// Estimated total height for this chunk
@@ -513,7 +513,7 @@ private struct BlockView: View {
     var highlighted: AttributedString? = nil
     var codeFontSize: CGFloat = 13
     var codeFontFamily: String? = nil
-    var onTaskToggle: ((Int, Bool) -> Void)?
+    var onTaskToggle: ((UUID, Bool) -> Void)?
     var onMermaidExpand: ((String) -> Void)?
 
     var body: some View {

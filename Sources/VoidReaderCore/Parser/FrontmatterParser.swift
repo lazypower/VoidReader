@@ -19,6 +19,12 @@ public struct FrontmatterData: Identifiable {
 /// Extracts YAML frontmatter from the top of a markdown document.
 public struct FrontmatterParser {
 
+    /// The closing `---` must appear within this many lines of the opener. Real
+    /// frontmatter is small; bounding the search stops a document that merely
+    /// opens with a `---` thematic break (with another `---` far below) from
+    /// having the whole region in between silently swallowed as frontmatter.
+    private static let maxScanLines = 50
+
     /// Result of parsing: the frontmatter (if any) and the remaining body.
     public struct Result {
         public var frontmatter: FrontmatterData?
@@ -32,20 +38,21 @@ public struct FrontmatterParser {
     /// lines, closed by another `---`. Everything after the closing fence is
     /// returned as the body.
     public static func parse(_ text: String) -> Result {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix("---") else {
+        // Cheap first-line check — scan only to the first line break instead of
+        // copying and splitting the whole document, so the common (no-frontmatter)
+        // case stays proportional to the first line rather than the file. Handles
+        // LF/CRLF/CR via `.newlines`. This runs on every render.
+        let firstLineEnd = text.rangeOfCharacter(from: .newlines)?.lowerBound ?? text.endIndex
+        guard text[..<firstLineEnd].trimmingCharacters(in: .whitespaces) == "---" else {
             return Result(frontmatter: nil, body: text)
         }
 
-        // Split into lines, find the closing ---
+        // Confirmed a frontmatter opener; split into lines to find the close.
         let lines = text.components(separatedBy: .newlines)
-        guard let firstLine = lines.first,
-              firstLine.trimmingCharacters(in: .whitespaces) == "---" else {
-            return Result(frontmatter: nil, body: text)
-        }
 
         var closingIndex: Int?
-        for i in 1..<lines.count {
+        let scanLimit = min(lines.count, maxScanLines + 1)
+        for i in 1..<scanLimit {
             if lines[i].trimmingCharacters(in: .whitespaces) == "---" {
                 closingIndex = i
                 break

@@ -11,12 +11,22 @@ public final class ThemeRegistry: @unchecked Sendable {
         .catppuccin
     ]
 
+    /// Serializes access to `_userThemes` — reloadUserThemes() can run off the
+    /// main thread while `themes`/`userThemes` are read, and the class is
+    /// `@unchecked Sendable`, so the mutable state needs a lock to make that safe.
+    private let lock = NSLock()
+    private var _userThemes: [AppTheme] = []
+
     /// User themes loaded from ~/Library/Application Support/VoidReader/themes/
-    public private(set) var userThemes: [AppTheme] = []
+    public var userThemes: [AppTheme] {
+        lock.lock(); defer { lock.unlock() }
+        return _userThemes
+    }
 
     /// All available themes. Built-in themes first, then user themes.
     public var themes: [AppTheme] {
-        builtInThemes + userThemes
+        lock.lock(); let user = _userThemes; lock.unlock()
+        return builtInThemes + user
     }
 
     /// The default theme (always System)
@@ -34,7 +44,9 @@ public final class ThemeRegistry: @unchecked Sendable {
 
     /// Reload user themes from disk
     public func reloadUserThemes() {
-        userThemes = ThemeLoader.loadUserThemes()
+        // Load outside the lock (disk I/O), then swap in under it.
+        let loaded = ThemeLoader.loadUserThemes()
+        lock.lock(); _userThemes = loaded; lock.unlock()
     }
 
     /// Opens the themes directory in Finder and creates example if needed

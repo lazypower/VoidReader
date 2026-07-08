@@ -22,15 +22,12 @@ public protocol LintRule {
 /// Helper for working with source text lines.
 public struct SourceLines {
     private let lines: [Substring]
-    private let lineStarts: [String.Index]
 
     public init(_ source: String) {
         var lines: [Substring] = []
-        var lineStarts: [String.Index] = []
         var currentIndex = source.startIndex
 
         while currentIndex < source.endIndex {
-            lineStarts.append(currentIndex)
             if let newlineIndex = source[currentIndex...].firstIndex(of: "\n") {
                 lines.append(source[currentIndex..<newlineIndex])
                 currentIndex = source.index(after: newlineIndex)
@@ -42,12 +39,10 @@ public struct SourceLines {
 
         // Handle empty string or trailing newline
         if source.isEmpty || source.last == "\n" {
-            lineStarts.append(source.endIndex)
             lines.append("")
         }
 
         self.lines = lines
-        self.lineStarts = lineStarts
     }
 
     /// Number of lines.
@@ -57,16 +52,6 @@ public struct SourceLines {
     public subscript(index: Int) -> Substring {
         guard index >= 0 && index < lines.count else { return "" }
         return lines[index]
-    }
-
-    /// Get line number (1-based) for a character index.
-    public func lineNumber(for index: String.Index, in source: String) -> Int {
-        for (lineIndex, start) in lineStarts.enumerated().reversed() {
-            if index >= start {
-                return lineIndex + 1
-            }
-        }
-        return 1
     }
 
     /// All lines as array of strings.

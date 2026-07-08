@@ -9,7 +9,8 @@ struct ResizableSplitView<Left: View, Right: View>: View {
     let minLeftFraction: CGFloat
     let maxLeftFraction: CGFloat
 
-    @State private var isDragging = false
+    /// Fixed coordinate space the divider drag is measured in.
+    private static var coordinateSpace: String { "ResizableSplitView" }
 
     init(
         leftFraction: Binding<CGFloat>,
@@ -43,20 +44,23 @@ struct ResizableSplitView<Left: View, Right: View>: View {
                             .cursor(.resizeLeftRight)
                     )
                     .gesture(
-                        DragGesture()
+                        // Track the cursor's ABSOLUTE x in the fixed container
+                        // coordinate space, not translation in the divider's own
+                        // (moving) space. As the divider moves with leftFraction,
+                        // a local/translation gesture re-references itself every
+                        // tick — that feedback is what made the divider shudder and
+                        // snap to the clamp edges. Absolute position doesn't feed back.
+                        DragGesture(coordinateSpace: .named(Self.coordinateSpace))
                             .onChanged { value in
-                                isDragging = true
-                                let newFraction = (geo.size.width * leftFraction + value.translation.width) / geo.size.width
-                                leftFraction = min(max(newFraction, minLeftFraction), maxLeftFraction)
-                            }
-                            .onEnded { _ in
-                                isDragging = false
+                                let fraction = value.location.x / geo.size.width
+                                leftFraction = min(max(fraction, minLeftFraction), maxLeftFraction)
                             }
                     )
 
                 right
                     .frame(maxWidth: .infinity)
             }
+            .coordinateSpace(name: Self.coordinateSpace)
         }
     }
 }
@@ -65,13 +69,34 @@ struct ResizableSplitView<Left: View, Right: View>: View {
 
 extension View {
     func cursor(_ cursor: NSCursor) -> some View {
-        self.onHover { hovering in
-            if hovering {
-                cursor.push()
-            } else {
-                NSCursor.pop()
+        modifier(HoverCursor(cursor: cursor))
+    }
+}
+
+/// Pushes a cursor while hovered and always balances the pop — including when
+/// the view disappears mid-hover, which the bare `onHover` push/pop leaked,
+/// leaving the resize cursor stuck.
+private struct HoverCursor: ViewModifier {
+    let cursor: NSCursor
+    @State private var pushed = false
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { hovering in
+                if hovering, !pushed {
+                    cursor.push()
+                    pushed = true
+                } else if !hovering, pushed {
+                    NSCursor.pop()
+                    pushed = false
+                }
             }
-        }
+            .onDisappear {
+                if pushed {
+                    NSCursor.pop()
+                    pushed = false
+                }
+            }
     }
 }
 

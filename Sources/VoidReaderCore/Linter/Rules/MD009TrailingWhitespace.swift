@@ -11,10 +11,13 @@ public struct MD009TrailingWhitespace: LintRule {
     public func check(document: Document, source: String) -> [LintWarning] {
         var warnings: [LintWarning] = []
         let lines = source.components(separatedBy: "\n")
+        // Trailing whitespace inside a fenced code block can be significant, so
+        // skip fenced lines — matching the AST-based rules, which never see them.
+        let fence = FenceMap(lines: lines)
 
         for (index, line) in lines.enumerated() {
-            // Skip if line is empty
-            guard !line.isEmpty else { continue }
+            // Skip fenced content and empty lines.
+            guard !fence.isProtected(index), !line.isEmpty else { continue }
 
             // Check for trailing whitespace (spaces or tabs)
             if let lastChar = line.last, lastChar.isWhitespace && lastChar != "\n" {
