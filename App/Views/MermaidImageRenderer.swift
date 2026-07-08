@@ -49,6 +49,11 @@ private class WebViewRenderer: NSObject, WKNavigationDelegate, WKScriptMessageHa
     private let maxWidth: CGFloat
     private let completion: (NSImage?) -> Void
     private var webView: WKWebView?
+    /// Off-screen host window. A windowless WKWebView receives no display frames,
+    /// so the template's `requestAnimationFrame` size report never fires (render
+    /// times out → blank), and `takeSnapshot` has nothing composited. Hosting the
+    /// webview in a window parked far off-screen restores both.
+    private var hostWindow: NSWindow?
     private var timeoutTask: DispatchWorkItem?
     /// Guards against resuming the continuation twice. `finish` is reachable from
     /// several racing paths — the 5s timeout, the size-report handler, the
@@ -73,6 +78,20 @@ private class WebViewRenderer: NSObject, WKNavigationDelegate, WKScriptMessageHa
         webView.navigationDelegate = self
         webView.setValue(false, forKey: "drawsBackground")
         self.webView = webView
+
+        // Park the webview in an off-screen window so it gets display frames
+        // (rAF fires, size reports, snapshot composites) without ever being seen.
+        let window = NSWindow(
+            contentRect: webView.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = webView
+        window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+        window.orderBack(nil)
+        self.hostWindow = window
 
         // Timeout after 5 seconds
         let timeout = DispatchWorkItem { [weak self] in
@@ -118,8 +137,10 @@ private class WebViewRenderer: NSObject, WKNavigationDelegate, WKScriptMessageHa
             return
         }
 
-        // Resize webview to fit content and capture
+        // Resize to fit content and capture. The webview is the window's content
+        // view, so resize through the window.
         let size = NSSize(width: min(CGFloat(width) + 32, maxWidth), height: CGFloat(height) + 32)
+        hostWindow?.setContentSize(size)
         webView?.frame.size = size
 
         // Small delay to let layout settle
@@ -134,24 +155,25 @@ private class WebViewRenderer: NSObject, WKNavigationDelegate, WKScriptMessageHa
             return
         }
 
-        let config = WKSnapshotConfiguration()
+        // Render via createPDF rather than takeSnapshot. takeSnapshot needs the
+        // webview composited on-screen; createPDF renders the DOM headlessly
+        // (WebKit's print path), so it works for an off-screen export webview.
+        // NSImage loads the PDF representation directly.
+        let config = WKPDFConfiguration()
         config.rect = webView.bounds
 
-        webView.takeSnapshot(with: config) { [weak self] image, error in
-            if let error = error {
-                print("Mermaid snapshot error: \(error)")
+        webView.createPDF(configuration: config) { [weak self] result in
+            switch result {
+            case .success(let data):
+                if let image = NSImage(data: data), image.size.width > 0 {
+                    self?.finish(with: image)
+                } else {
+                    self?.finish(with: nil)
+                }
+            case .failure(let error):
+                print("Mermaid PDF render error: \(error)")
                 self?.finish(with: nil)
-                return
             }
-
-            // Convert to NSImage
-            guard let cgImage = image?.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-                self?.finish(with: nil)
-                return
-            }
-
-            let nsImage = NSImage(cgImage: cgImage, size: webView.bounds.size)
-            self?.finish(with: nsImage)
         }
     }
 
@@ -162,12 +184,15 @@ private class WebViewRenderer: NSObject, WKNavigationDelegate, WKScriptMessageHa
         timeoutTask?.cancel()
         timeoutTask = nil
 
-        // Clean up webview
+        // Clean up webview + its off-screen host window
         if let webView = webView {
             webView.configuration.userContentController.removeScriptMessageHandler(forName: "sizeReporter")
             webView.navigationDelegate = nil
         }
         webView = nil
+        hostWindow?.orderOut(nil)
+        hostWindow?.contentView = nil
+        hostWindow = nil
 
         completion(image)
     }

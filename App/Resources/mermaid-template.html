@@ -97,11 +97,15 @@
                     svgEl.style.height = 'auto';
                 }
 
-                // Wait one frame for layout to settle, then report size
-                requestAnimationFrame(() => {
+                // Report size after layout settles. Use setTimeout, NOT
+                // requestAnimationFrame: the off-screen WKWebView used for print
+                // export receives no display frames, so rAF never fires and the
+                // render times out (blank). setTimeout runs on the JS event loop
+                // regardless of display, and getBoundingClientRect forces layout.
+                setTimeout(() => {
                     reportSize(true);
                     attachResizeObserver();
-                });
+                }, 50);
             } catch (error) {
                 const container = document.getElementById('mermaid-container');
                 container.innerHTML = '<div class="error">Mermaid Error: ' + error.message + '</div>';
