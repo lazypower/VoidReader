@@ -7,7 +7,7 @@ cask "voidreader" do
   desc "Native macOS markdown viewer with a reader-first philosophy"
   homepage "https://github.com/lazypower/VoidReader"
 
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "VoidReader.app"
 
