@@ -1,6 +1,6 @@
 ---
 name: release
-description: Prep and publish a VoidReader release — version bump, perf data from Gitea CI, release notes, tag, push
+description: Prep and publish a VoidReader release — version bump, CHANGELOG, house-style notes, tag, and edit the release body after CI publishes
 disable-model-invocation: true
 user-invocable: true
 arguments: [version]
@@ -8,107 +8,124 @@ arguments: [version]
 
 # Release VoidReader v$version
 
-Run the full release pipeline for version **$version**. GitHub CI will create the tag + release artifact (DMG) automatically when the tag is pushed — we edit the release afterward to add notes.
+The full pipeline for **$version**. A human pushes a `v$version` tag; GitHub's `release.yml` does the build / sign / notarize / GitHub-release / Homebrew-cask work automatically. Everything before the tag is prep; the nice release body is edited in *after* CI publishes.
 
-## Step 1: Pre-flight
+## How it works (so the steps make sense)
 
-- Confirm `main` is clean (`git status`)
-- Confirm all CI is green on Gitea for the current HEAD
-- List commits since the last tag: `git log $(git describe --tags --abbrev=0)..HEAD --oneline`
+`.github/workflows/release.yml` triggers on any `v*` tag push and, on a macOS runner:
 
-## Step 2: Version bump
+1. Asserts `project.yml`'s version (both generated `Info.plist`s) `== the tag`, or **fails** before building.
+2. Builds + signs + notarizes the DMG (`make dmg-signed`; Apple creds are CI secrets).
+3. Asserts the **built** `.app`'s `CFBundleShortVersionString == the tag`, or refuses to publish.
+4. Creates the GitHub Release with the DMG attached and **auto-generated** notes (`--generate-notes`).
+5. Updates the Homebrew cask in `lazypower/homebrew-tap` (version + SHA256).
 
-Update `CFBundleShortVersionString` in **both** targets in `project.yml`:
-- `VoidReader` target (around line 54)
-- `VoidReaderQuickLook` target (around line 100)
+Two consequences: the **tag is the trigger**, the version gate is strict (drift fails the job), and the good release body is **not** written by CI — you replace the auto notes in Step 7.
 
-Both must read `"$version"`. This is critical — we shipped 1.0.1 with "1.0.0" in About once. Don't repeat that.
+**Remotes:** `github` is where releases live (the workflow is GitHub-only); `origin` (gitea) only runs the test/perf CI. The release tag must reach **`github`** to fire the workflow.
 
-The release workflow now asserts both Info.plists match the tag version (pre-build) and asserts the built `.app` matches the tag (post-build). If `project.yml` drifts from the tag, the release job will fail before any artifact reaches Homebrew.
+## Semver — no features = patch
 
-## Step 3: Pull performance data from Gitea
+- **Patch** (`x.y.Z`): fixes, hardening, packaging, cleanup — no new user-facing feature. However chonky. (1.2.1 "Trust Issues" was ~30 fixes and is still a patch.)
+- **Minor** (`x.Y.0`): a genuine new capability shipped.
 
-Fetch the latest `test-perf-lab.yml` run results from Gitea CI:
+Don't inflate a fixes release to a minor because it's big.
 
-```bash
-# Find the most recent completed perf lab run
-tea api repos/chuck/VoidReader/actions/runs 2>/dev/null | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-runs = data.get('workflow_runs', [])
-for r in runs:
-    path = r.get('path','').split('@')[0]
-    if path == 'test-perf-lab.yml' and r['status'] == 'completed':
-        print(r['id'])
-        break
-"
+## Step 1 — Pre-flight
+
+- On `main`, clean tree, the release work merged.
+- CI green on **both** gitea and github for `HEAD`.
+- Review what's shipping: `git log $(git describe --tags --abbrev=0)..HEAD --oneline`
+
+## Step 2 — Version bump
+
+Set `CFBundleShortVersionString` to `$version` in **both** targets in `project.yml`:
+- `VoidReader` (~line 54)
+- `VoidReaderQuickLook` (~line 100)
+
+Both must match the tag or the release job fails the version gate (pre-build *and* post-build). `make project` regenerates the `Info.plist`s if you want to verify locally with `PlistBuddy`.
+
+## Step 3 — CHANGELOG
+
+Add a top entry to `CHANGELOG.md` (just below the intro `---`), newest-first, in house format:
+
+```
+## [$version] - YYYY-MM-DD
+
+### The "<Name>" Release
+
+<one-line tagline>
+
+#### Fixed
+- ...
+#### Added / Performance / Housekeeping   (as applicable)
+- ...
+#### The Numbers   (optional, for big releases)
+- ...
 ```
 
-Then pull the job logs for each scenario and extract the `=== window ===` summary lines:
+## Step 4 — (optional) Perf data — only if the lab actually ran
+
+**Reality check first.** `.gitea/workflows/test-perf-lab.yml` is **path-gated** — it only runs when `scripts/perf/**`, `PERFORMANCE.md`, or its fixtures change. A normal fixes/hardening release touches none of those, so there's usually **no fresh perf run on the release commit** (0 test-perf-lab runs in the last 50 pushes, as of 1.2.1). Don't document numbers that don't exist.
+
+- **Fixes/hardening release → skip the perf table.** That's most releases (1.2.1 had none). Move on to Step 5.
+- **Perf-relevant release, or you specifically want fresh numbers →** the lab has `workflow_dispatch`, so trigger it *first*: run **Performance Lab → "Run workflow"** in the Gitea Actions UI (or dispatch via API), wait for it to complete, then pull:
 
 ```bash
-# Get jobs for the perf run
-tea api repos/chuck/VoidReader/actions/runs/<RUN_ID>/jobs
-
-# For each scenario job, extract the profile summary
-tea api repos/chuck/VoidReader/actions/jobs/<JOB_ID>/logs | grep -A 20 "=== window ==="
+# most recent COMPLETED perf-lab run (widen the window; it's rare)
+tea api --login gitea.wabash.place "repos/chuck/VoidReader/actions/runs?limit=50" | python3 -c "
+import json,sys
+for r in json.load(sys.stdin).get('workflow_runs',[]):
+    if r.get('path','').split('@')[0]=='test-perf-lab.yml' and r['status']=='completed':
+        print(r['id']); break"
+# jobs, then the '=== window ===' summaries
+tea api --login gitea.wabash.place repos/chuck/VoidReader/actions/runs/<RUN_ID>/jobs
+tea api --login gitea.wabash.place repos/chuck/VoidReader/actions/jobs/<JOB_ID>/logs | grep -A20 '=== window ==='
 ```
 
-Scenarios to collect:
-- **open-large** — document open time, first paint
-- **scroll-to-bottom** — sustained scroll, frame drops
-- **search-navigate** — find-bar responsiveness
-- **edit-toggle** — reader/editor switch latency
+Scenarios: `open-large`, `scroll-to-bottom`, `search-navigate`, `edit-toggle`. Summarize samples, idle-vs-work ratio, top app frames for the notes table.
 
-Summarize key numbers for the release notes (total samples, idle vs work ratio, top app frames).
+## Step 5 — Release notes (the GitHub release body)
 
-## Step 4: Draft release notes
+House voice — self-aware, cheeky, technically grounded:
+- Title: `VoidReader X.Y.Z — "Subtitle"`
+- Bold **"The one where…"** tagline
+- Sections framed by *user impact* (with jokes), not a commit list
+- Optional perf table (Step 4), a **The Numbers** block, install instructions, changelog link
+- Tone reference: 1.2.1 "Trust Issues", 1.2.0 "Reading the Fine Print", 1.1.0 "We Measure Twice Now", 1.0.4 "Math Is Hard"
 
-Write release notes in VoidReader's established voice:
-- Self-aware, cheeky, technically grounded
-- Title format: `VoidReader X.Y.Z — "Subtitle Here"`
-- Subtitle is a quip that captures the release theme
-- Structure: tagline → feature sections → perf data table → install instructions → changelog link → co-author quip
-- Include perf lab numbers in a table or inline
-- End with install instructions (brew + DMG)
-- Co-author line references the Claude model used
+Save it to a file (e.g. `scratchpad/RELEASE_NOTES_$version.md`) for Step 7.
 
-Reference prior releases for tone:
-- v1.1.0: "We Measure Twice Now"
-- v1.0.4: "Math Is Hard"
-
-**Do NOT publish yet.** Draft the notes and show them to the user for approval.
-
-## Step 5: Commit, tag, push
-
-Once the user approves the notes:
+## Step 6 — Commit, then tag (SEPARATELY)
 
 ```bash
-git add project.yml
-git commit -m "bump: version $version"
-git tag -a "v$version" -m "Release v$version"
-git push github main && git push github "v$version"
-git push gitea main && git push gitea "v$version"
+git add project.yml CHANGELOG.md
+git commit -m "release: v$version"
+
+git push github main            # 1) commits first
+git tag v$version
+git push github v$version        # 2) tag SEPARATELY — THIS fires release.yml
 ```
 
-Push to **both** remotes (github + gitea).
+Push commits and the tag as **separate** pushes (a combined push can miss the tag trigger). Then keep gitea in sync: `git push origin main` (and `git push origin v$version` to mirror the tag if you like — gitea won't publish, it just keeps history aligned).
 
-## Step 6: Publish notes
+## Step 7 — Replace the auto notes with the house body
 
-Wait for GitHub Actions to create the release (triggered by the tag push), then edit it with the approved notes:
+CI created the release with `--generate-notes`. Swap in the real body:
 
 ```bash
-gh release edit "v$version" --repo lazypower/VoidReader --notes "$(cat <<'EOF'
-<release notes here>
-EOF
-)"
+gh release edit v$version --repo lazypower/VoidReader --notes-file scratchpad/RELEASE_NOTES_$version.md
 ```
 
-Confirm the release is live and the DMG artifact is attached before reporting done.
+Verify:
+```bash
+gh release view v$version --repo lazypower/VoidReader   # body + DMG asset attached
+# confirm the cask bumped: check lazypower/homebrew-tap Casks/voidreader.rb
+```
 
-## Reminders
+## Gotchas & rollback
 
-- Version in project.yml must match the git tag
-- Push to both github and gitea remotes
-- GitHub CI publishes the release — we just edit the notes onto it
-- Never skip the perf data — we promised numbers with every release starting v1.2.0
+- **Version gate failed?** Bump both `project.yml` targets, then re-tag:
+  `git push github :v$version && git tag -d v$version` → fix → re-tag → push tag again.
+- **Don't hand-build the release DMG.** CI signs + notarizes with Apple creds; a local `make dmg-signed` needs your Developer ID + notarization credentials and won't match CI's artifact.
+- The release body is the **only** manual step after tagging — everything else (build, sign, notarize, GitHub release, Homebrew) is automatic once the tag lands on `github`.
