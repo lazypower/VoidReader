@@ -172,6 +172,24 @@ struct DocumentHeightIndexTests {
         )
     }
 
+    @Test("Batch measurements publish one atomic geometry update")
+    @MainActor func batchMeasurementsAreAtomic() {
+        let index = DocumentHeightIndex()
+        index.configure(blockCount: 3, blockSpacing: 16, fallback: { _ in 100 })
+        let versionBeforeBatch = index.version
+
+        let changed = index.recordHeights([0: 120, 1: 140, 2: 160])
+
+        #expect(changed)
+        #expect(index.totalHeight == 452)
+        #expect(index.version == versionBeforeBatch + 1)
+
+        let versionAfterBatch = index.version
+        let insignificant = index.recordHeights([0: 121, 1: 139])
+        #expect(!insignificant)
+        #expect(index.version == versionAfterBatch)
+    }
+
     // MARK: - Linear scaling
 
     @Test("scrollFraction scales linearly across full range")
