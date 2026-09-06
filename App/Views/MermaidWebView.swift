@@ -62,6 +62,12 @@ struct MermaidWebView: NSViewRepresentable {
         Coordinator(heightBinding: $renderedHeight, errorBinding: $hasError, errorMessageBinding: errorMessage)
     }
 
+    static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "sizeReporter")
+    }
+
     private func loadMermaid(in webView: WKWebView) {
         guard let templateURL = Bundle.main.url(forResource: "mermaid-template", withExtension: "html"),
               var template = try? String(contentsOf: templateURL) else {
@@ -155,20 +161,28 @@ private nonisolated(unsafe) var mermaidErrorCache = [String: String]()
 struct MermaidBlockView: View {
     let data: MermaidData
     var onExpand: ((String) -> Void)? = nil
-    @State private var renderedHeight: CGFloat = 0
+    @State private var renderedImage: NSImage?
     @State private var hasError = false
-    @State private var isRendered = false
     @State private var errorMessage: String = ""
     @State private var showingError = false
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("selectedThemeID") private var selectedThemeID: String = "system"
+
+    private var currentTheme: AppTheme {
+        ThemeRegistry.shared.themeOrDefault(id: selectedThemeID)
+    }
+
+    private var renderKey: String {
+        let variables = currentTheme.mermaidThemeVariables(for: colorScheme)
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: "&")
+        return "\(data.source.hashValue)|\(selectedThemeID)|\(colorScheme)|\(variables)"
+    }
 
     /// Check cache synchronously — prevents WebView creation on recycled views
     private var cachedError: String? {
         mermaidErrorCache[data.source]
-    }
-
-    // Display height animates from 0 to final height
-    private var displayHeight: CGFloat {
-        isRendered ? renderedHeight : 0
     }
 
     private var isError: Bool {
@@ -219,7 +233,7 @@ struct MermaidBlockView: View {
                 }
 
                 Spacer()
-                if !isError && isRendered {
+                if !isError && renderedImage != nil {
                     Button {
                         onExpand?(data.source)
                     } label: {
@@ -235,28 +249,44 @@ struct MermaidBlockView: View {
             if isError {
                 // Fallback: show raw mermaid code
                 CodeBlockView(data: CodeBlockData(code: data.source, language: "mermaid"))
-            } else {
-                // WebView - grows in smoothly when rendered
-                MermaidWebView(source: data.source, renderedHeight: $renderedHeight, hasError: $hasError, errorMessage: $errorMessage)
-                    .frame(height: max(displayHeight, 1)) // min 1 to keep WebView alive
+            } else if let renderedImage {
+                Image(nsImage: renderedImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
                     .frame(maxWidth: .infinity)
                     .background(Color(nsColor: .controlBackgroundColor))
                     .cornerRadius(8)
-                    .opacity(isRendered ? 1 : 0)
-                    .clipped()
+                    .accessibilityLabel("Mermaid diagram")
+                    .transition(.opacity)
+            } else {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .overlay { ProgressView().controlSize(.small) }
+                    .frame(height: 180)
+                    .frame(maxWidth: .infinity)
             }
         }
         .padding(.vertical, 4)
-        .animation(.easeInOut(duration: 0.35), value: isRendered)
-        .onChange(of: hasError) { _, isError in
-            if isError {
-                mermaidErrorCache[data.source] = errorMessage.isEmpty ? "Unknown error" : errorMessage
-            }
-        }
-        .onChange(of: renderedHeight) { _, newValue in
-            // Mark as rendered once we get real dimensions
-            if newValue > 0 && !isRendered {
-                isRendered = true
+        .animation(.easeOut(duration: 0.15), value: renderedImage != nil)
+        .task(id: renderKey) {
+            let theme = currentTheme
+            let image = await MermaidImageRenderer.render(
+                source: data.source,
+                maxWidth: 900,
+                themeName: theme.mermaidThemeName(for: colorScheme),
+                themeVariables: theme.mermaidThemeVariables(for: colorScheme)
+            )
+            guard !Task.isCancelled else { return }
+
+            if let image {
+                renderedImage = image
+                hasError = false
+                errorMessage = ""
+            } else if renderedImage == nil {
+                errorMessage = "The diagram could not be rendered."
+                mermaidErrorCache[data.source] = errorMessage
+                hasError = true
             }
         }
     }

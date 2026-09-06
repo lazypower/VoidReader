@@ -7,11 +7,11 @@ public struct BlockRenderer {
 
     /// Line count above which a fenced code block is split into multiple
     /// `CodeSegment`-bearing `.codeBlock` entries. At typical code font
-    /// metrics (~16pt line height), 800 lines ≈ 12,800pt — well under the
-    /// SwiftUI `ScrollView` hit-test ceiling (~50k pt) that pathological
-    /// single blocks were crossing. Below the threshold, the block renders
-    /// as a single row exactly as before.
-    public static let segmentationLineThreshold = 800
+    /// metrics (~16pt line height), 200 lines ≈ 3,200pt. Keeping each TextKit
+    /// surface this small prevents first-visible layout from spanning many
+    /// frames while preserving one seamless visual code block. Below the
+    /// threshold, the block renders as a single row exactly as before.
+    public static let segmentationLineThreshold = 200
 
     /// Split a code block's raw source into `segmentationLineThreshold`-line
     /// slices, joined by a shared `groupID`. Returns a single-element array
@@ -442,8 +442,7 @@ struct BlockWalker: MarkupWalker {
         // Extract header cells
         for child in table.head.children {
             if let cell = child as? Markdown.Table.Cell {
-                let content = renderInlineContent(cell)
-                headers.append(TableCell(content: content))
+                headers.append(renderTableCell(cell))
             }
         }
 
@@ -458,8 +457,7 @@ struct BlockWalker: MarkupWalker {
                 var rowCells: [TableCell] = []
                 for cellChild in row.children {
                     if let cell = cellChild as? Markdown.Table.Cell {
-                        let content = renderInlineContent(cell)
-                        rowCells.append(TableCell(content: content))
+                        rowCells.append(renderTableCell(cell))
                     }
                 }
                 rows.append(rowCells)
@@ -467,6 +465,21 @@ struct BlockWalker: MarkupWalker {
         }
 
         blocks.append(.table(TableData(headers: headers, rows: rows, alignments: alignments)))
+    }
+
+    /// Keep the overwhelmingly common plain-text table cell compact. The
+    /// table view supplies its font, so constructing an AttributedString with
+    /// one redundant font run per cell only adds allocation and conversion
+    /// work. Cells with real inline semantics retain the rich path.
+    private func renderTableCell(_ cell: Markdown.Table.Cell) -> TableCell {
+        let children = Array(cell.children)
+        if children.allSatisfy({ child in
+            guard let text = child as? Markdown.Text else { return false }
+            return InlineMathParser.extract(from: text.string).isEmpty
+        }) {
+            return TableCell(text: children.compactMap { ($0 as? Markdown.Text)?.string }.joined())
+        }
+        return TableCell(content: renderInlineContent(cell))
     }
 
     mutating func visitUnorderedList(_ list: UnorderedList) {

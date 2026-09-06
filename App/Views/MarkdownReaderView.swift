@@ -23,13 +23,14 @@ struct MarkdownReaderView: View {
         // between ordinary blocks but 0 between same-group code segments,
         // so a segmented code block renders with no visible seams.
         LazyVStack(alignment: .leading, spacing: 0) {
-            // Identity tracks block.id, not index. Index-based identity
-            // caused SwiftUI to reuse CodeBlockView @State (highlighted +
-            // measurement caches) across different blocks when the block
-            // list regenerated on edit/reload/settings change.
-            ForEach(Array(renderBlocks.enumerated()), id: \.element.id) { index, block in
+            // The collection uses its stable slot as identity. Calling
+            // MarkdownBlock.id here hashes every text AttributedString on
+            // every scroll-driven body update. Stateful children carry a
+            // separate content identity so edit/reload still resets them.
+            ForEach(Array(renderBlocks.enumerated()), id: \.offset) { index, block in
                 blockView(for: block)
                     .padding(.top, BlockSpacing.topSpacing(at: index, in: renderBlocks))
+                    .id(block.viewIdentity(slot: index))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -164,7 +165,6 @@ struct MarkdownReaderViewWithAnchors: View {
     var codeFontFamily: String? = nil
     var onTaskToggle: ((UUID, Bool) -> Void)?
     var onTopBlockChange: ((Int) -> Void)?
-    var onScrollProgress: ((Int) -> Void)?  // Reports percent read (0-100)
     var onMermaidExpand: ((String) -> Void)?
 
     /// Cached search match info - only recomputed when search changes
@@ -206,8 +206,7 @@ struct MarkdownReaderViewWithAnchors: View {
             // Scroll tracker at top of content
             scrollTracker
 
-            // Identity tracks block.id, not index — see MarkdownReaderView.body.
-            ForEach(Array(renderBlocks.enumerated()), id: \.element.id) { index, _ in
+            ForEach(Array(renderBlocks.enumerated()), id: \.offset) { index, _ in
                 blockContent(at: index, in: renderBlocks)
                     .padding(.top, BlockSpacing.topSpacing(at: index, in: renderBlocks))
             }
@@ -276,7 +275,7 @@ struct MarkdownReaderViewWithAnchors: View {
             onMermaidExpand: onMermaidExpand
         )
         .frame(minHeight: renderBlocks[index].estimatedHeight)
-        .id("block-\(index)")
+        .id(renderBlocks[index].viewIdentity(slot: index))
     }
 
     private func setupState(blocks: [MarkdownBlock]) {
@@ -304,7 +303,6 @@ struct MarkdownReaderViewWithAnchors: View {
         guard blockIndex != lastReportedBlockIndex else { return }
         lastReportedBlockIndex = blockIndex
         onTopBlockChange?(blockIndex)
-        // Note: onScrollProgress is now handled by ContentView's scroll tracker
     }
 
     /// Only recompute match info when search parameters change
@@ -476,9 +474,8 @@ private struct ChunkView: View {
         // `directContent` so segmented code blocks stay seamless across
         // chunk boundaries as well.
         VStack(alignment: .leading, spacing: 0) {
-            // Identity tracks block.id, not slot index — see MarkdownReaderView.body.
             // `offset` is slice-local (0-based); global index is `startIndex + offset`.
-            ForEach(Array(blocks[startIndex..<endIndex].enumerated()), id: \.element.id) { offset, _ in
+            ForEach(Array(blocks[startIndex..<endIndex].enumerated()), id: \.offset) { offset, _ in
                 let index = startIndex + offset
                 // Add match anchor if this block contains the current match
                 if let matchIdx = cachedMatchInfo.blockToFirstMatch[index], matchIdx == currentMatchIndex {
@@ -495,10 +492,38 @@ private struct ChunkView: View {
                     onMermaidExpand: onMermaidExpand
                 )
                 .padding(.top, BlockSpacing.topSpacing(at: index, in: blocks))
-                .id("block-\(index)")
+                .id(blocks[index].viewIdentity(slot: index))
             }
         }
         .frame(minHeight: estimatedHeight)
+    }
+}
+
+private extension MarkdownBlock {
+    /// Cheap SwiftUI identity for a block at a document slot. Text has no
+    /// child-local state, so its slot is sufficient and its value updates in
+    /// place. Stateful block kinds include their parse-time UUID so a reload
+    /// cannot reuse highlighting, measurement, or web content from the old
+    /// block at the same slot.
+    func viewIdentity(slot: Int) -> String {
+        switch self {
+        case .text:
+            return "text-\(slot)"
+        case .table(let data):
+            return "table-\(data.id)"
+        case .taskList(let items):
+            return "tasklist-\(items.first?.id.uuidString ?? "empty")-\(items.count)"
+        case .codeBlock(let data):
+            return "code-\(data.id)"
+        case .image(let data):
+            return "image-\(data.id)"
+        case .mermaid(let data):
+            return "mermaid-\(data.id)"
+        case .mathBlock(let data):
+            return "math-\(data.id)"
+        case .frontmatter(let data):
+            return "frontmatter-\(data.id)"
+        }
     }
 }
 

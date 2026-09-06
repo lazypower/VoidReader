@@ -26,6 +26,7 @@ struct CodeBlockMeasurementKey: Hashable {
     let fontName: String
     let fontSize: CGFloat
     let themeName: String
+    let allowsHighlighting: Bool
     let containerWidth: CGFloat
     let lineFragmentPadding: CGFloat
 
@@ -35,12 +36,14 @@ struct CodeBlockMeasurementKey: Hashable {
         fontSize: CGFloat,
         themeName: String,
         containerWidth: CGFloat = CodeBlockLayoutConfig.containerWidth,
-        lineFragmentPadding: CGFloat = CodeBlockLayoutConfig.lineFragmentPadding
+        lineFragmentPadding: CGFloat = CodeBlockLayoutConfig.lineFragmentPadding,
+        allowsHighlighting: Bool = true
     ) {
         self.contentHash = SHA256.hash(data: Data(code.utf8))
         self.fontName = fontName
         self.fontSize = fontSize
         self.themeName = themeName
+        self.allowsHighlighting = allowsHighlighting
         self.containerWidth = containerWidth
         self.lineFragmentPadding = lineFragmentPadding
     }
@@ -125,7 +128,8 @@ enum CodeBlockMeasurement {
         language: String?,
         font: NSFont,
         themeName: String,
-        highlighter: Highlightr?
+        highlighter: Highlightr?,
+        allowsHighlighting: Bool
     ) -> CodeBlockMeasurementResult {
         // Above the highlight ceiling, we still measure height (the renderer
         // needs an authoritative frame) but skip building + caching the
@@ -136,7 +140,7 @@ enum CodeBlockMeasurement {
         let measuredFor: NSAttributedString
         let shouldCacheAttributed: Bool
 
-        if code.count <= maxHighlightChars, let highlightr = highlighter {
+        if allowsHighlighting, code.count <= maxHighlightChars, let highlightr = highlighter {
             highlightr.setTheme(to: themeName)
             if let highlighted = highlightr.highlight(code, as: language?.lowercased()) {
                 measuredFor = slim(highlighted, font: font)
@@ -221,6 +225,7 @@ enum CodeBlockMeasurementScheduler {
         fontName: String,
         fontSize: CGFloat,
         themeName: String,
+        allowsHighlighting: Bool = true,
         cache: CodeBlockMeasurementCache,
         onComplete: @escaping @MainActor (CodeBlockMeasurementKey, CodeBlockMeasurementResult) -> Void
     ) {
@@ -228,7 +233,8 @@ enum CodeBlockMeasurementScheduler {
             code: code,
             fontName: fontName,
             fontSize: fontSize,
-            themeName: themeName
+            themeName: themeName,
+            allowsHighlighting: allowsHighlighting
         )
 
         Task {
@@ -254,7 +260,8 @@ enum CodeBlockMeasurementScheduler {
                     language: language,
                     font: resolvedFont,
                     themeName: themeName,
-                    highlighter: highlighter
+                    highlighter: highlighter,
+                    allowsHighlighting: allowsHighlighting
                 )
                 Task {
                     await cache.set(key, result: result)

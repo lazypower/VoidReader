@@ -119,7 +119,7 @@ enum TableMeasurement {
 
         // Headers (semibold).
         for (i, cell) in data.headers.enumerated() where i < colCount {
-            let text = String(cell.content.characters)
+            let text = cell.text
             let attr = NSAttributedString(string: text, attributes: [.font: headerFont])
             let w = ceil(attr.size().width)
             if w > widths[i] { widths[i] = w }
@@ -131,7 +131,7 @@ enum TableMeasurement {
         let bodyAttrs: [NSAttributedString.Key: Any] = [.font: bodyFont]
         for row in data.rows {
             for (i, cell) in row.enumerated() where i < colCount {
-                let text = String(cell.content.characters)
+                let text = cell.text
                 let attr = NSAttributedString(string: text, attributes: bodyAttrs)
                 let w = ceil(attr.size().width)
                 if w > widths[i] { widths[i] = w }

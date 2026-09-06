@@ -138,6 +138,10 @@ struct CodeBlockView: View {
         data.originalBlockSize > Self.maxSwiftUITextChars
     }
 
+    private var allowsHighlighting: Bool {
+        data.originalBlockSize <= RenderingThresholds.maxHighlightedLogicalCodeBlockChars
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Language badge + copy button — rendered only on the first
@@ -207,7 +211,13 @@ struct CodeBlockView: View {
 
     @ViewBuilder
     private var largeBlockContent: some View {
-        if let measurement {
+        if !allowsHighlighting {
+            PlainCodeView(text: data.code, font: nsFont)
+                .frame(height: placeholderHeight)
+                .padding(.horizontal, 12)
+                .padding(.top, codeTopPad)
+                .padding(.bottom, codeBottomPad)
+        } else if let measurement {
             // Authoritative render path. Frame height is exactly what
             // TextKit will lay out, so there's no post-paint shift.
             CodeTextView(
@@ -311,7 +321,7 @@ struct CodeBlockView: View {
     /// invalidate the cache (color scheme flip, re-entry after disappear).
     /// Each path is idempotent: cached results short-circuit immediately.
     private func onAppearOrInvalidate() {
-        if useNSTextView {
+        if useNSTextView && allowsHighlighting {
             requestMeasurement()
         } else {
             updateHighlightCache()
@@ -328,7 +338,8 @@ struct CodeBlockView: View {
             code: data.code,
             fontName: fontName,
             fontSize: fontSize,
-            themeName: themeName
+            themeName: themeName,
+            allowsHighlighting: allowsHighlighting
         )
 
         measurementSeq &+= 1
@@ -351,6 +362,7 @@ struct CodeBlockView: View {
                 fontName: fontName,
                 fontSize: fontSize,
                 themeName: themeName,
+                allowsHighlighting: allowsHighlighting,
                 cache: cache
             ) { _, result in
                 // Stale-result guard: if a newer measurement request superseded
@@ -532,6 +544,90 @@ private struct CodeTextView: NSViewRepresentable {
         coordinator.lastTextHash = textHash
         coordinator.lastFont = font
         coordinator.lastHighlightHash = highlightHash
+    }
+}
+
+/// Lightweight visible-line renderer for enormous logical code blocks where
+/// token highlighting is intentionally disabled. It avoids constructing a
+/// TextKit layout graph for each segment while retaining horizontal scrolling
+/// and the surrounding code-card chrome/copy behavior.
+private struct PlainCodeView: NSViewRepresentable {
+    let text: String
+    let font: NSFont
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = HorizontalOnlyScrollView()
+        scrollView.hasVerticalScroller = false
+        scrollView.hasHorizontalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.verticalScrollElasticity = .none
+        scrollView.documentView = PlainCodeCanvas(text: text, font: font)
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let canvas = scrollView.documentView as? PlainCodeCanvas else { return }
+        canvas.update(text: text, font: font)
+    }
+}
+
+private final class PlainCodeCanvas: NSView {
+    private var text: String
+    private var lines: [Substring] = []
+    private var font: NSFont
+    private var lineHeight: CGFloat = 0
+
+    override var isFlipped: Bool { true }
+    override var isOpaque: Bool { false }
+
+    init(text: String, font: NSFont) {
+        self.text = text
+        self.font = font
+        super.init(frame: .zero)
+        rebuild()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    func update(text: String, font: NSFont) {
+        guard self.text != text || self.font != font else { return }
+        self.text = text
+        self.font = font
+        rebuild()
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard !lines.isEmpty, lineHeight > 0 else { return }
+        let first = max(0, Int(floor(dirtyRect.minY / lineHeight)))
+        let last = min(lines.count - 1, Int(ceil(dirtyRect.maxY / lineHeight)))
+        guard first <= last else { return }
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.textColor,
+        ]
+        for index in first...last {
+            (String(lines[index]) as NSString).draw(
+                at: NSPoint(x: 0, y: CGFloat(index) * lineHeight),
+                withAttributes: attributes
+            )
+        }
+    }
+
+    private func rebuild() {
+        lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        lineHeight = ceil(font.ascender - font.descender + font.leading)
+
+        let widthAttributes: [NSAttributedString.Key: Any] = [.font: font]
+        var contentWidth: CGFloat = 1
+        for line in lines {
+            contentWidth = max(contentWidth, ceil((String(line) as NSString).size(withAttributes: widthAttributes).width))
+        }
+        frame.size = NSSize(width: contentWidth + 4, height: CGFloat(lines.count) * lineHeight)
     }
 }
 

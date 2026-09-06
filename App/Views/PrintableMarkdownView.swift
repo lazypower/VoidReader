@@ -320,7 +320,7 @@ final class PrintableMarkdownView: NSView {
                 .font: headerFont,
                 .foregroundColor: NSColor.textColor
             ]
-            let text = String(cell.content.characters)
+            let text = cell.text
             (text as NSString).draw(in: cellRect, withAttributes: attrs)
         }
 
@@ -346,7 +346,7 @@ final class PrintableMarkdownView: NSView {
                     .font: bodyFont,
                     .foregroundColor: NSColor.textColor
                 ]
-                let text = String(cell.content.characters)
+                let text = cell.text
                 (text as NSString).draw(in: cellRect, withAttributes: attrs)
             }
         }

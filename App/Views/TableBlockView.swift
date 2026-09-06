@@ -56,10 +56,10 @@ struct TableBlockView: View {
     private var gridBody: some View {
         Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
             GridRow {
-                ForEach(Array(data.headers.enumerated()), id: \.element.id) { index, cell in
+                ForEach(Array(data.headers.enumerated()), id: \.offset) { index, cell in
                     let alignment = index < data.alignments.count ? data.alignments[index] : .left
 
-                    Text(cell.content)
+                    tableText(cell)
                         .font(.system(size: Self.headerFontSize, weight: .semibold))
                         .frame(maxWidth: .infinity, alignment: Alignment(horizontal: alignment.horizontalAlignment, vertical: .center))
                         .padding(.horizontal, TableMeasurement.horizontalPadding)
@@ -72,10 +72,10 @@ struct TableBlockView: View {
 
             ForEach(Array(data.rows.enumerated()), id: \.offset) { rowIndex, row in
                 GridRow {
-                    ForEach(Array(row.enumerated()), id: \.element.id) { cellIndex, cell in
+                    ForEach(Array(row.enumerated()), id: \.offset) { cellIndex, cell in
                         let alignment = cellIndex < data.alignments.count ? data.alignments[cellIndex] : .left
 
-                        Text(cell.content)
+                        tableText(cell)
                             .font(.system(size: Self.bodyFontSize))
                             .frame(maxWidth: .infinity, alignment: Alignment(horizontal: alignment.horizontalAlignment, vertical: .center))
                             .padding(.horizontal, TableMeasurement.horizontalPadding)
@@ -129,72 +129,19 @@ struct TableBlockView: View {
     }
 
     private func renderedTable(widths: [CGFloat], measurement: TableMeasurementResult) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            headerRow(widths: widths, height: measurement.headerHeight)
-            Divider()
-
-            LazyVStack(alignment: .leading, spacing: 0) {
-                // Use row index as identity. Rows are structurally
-                // identical and never reordered, so index-based identity
-                // is stable and cheap (no UUID hashing per row).
-                ForEach(0..<data.rows.count, id: \.self) { rowIndex in
-                    bodyRow(
-                        rowIndex: rowIndex,
-                        widths: widths,
-                        height: measurement.rowHeight
-                    )
-                }
-            }
-        }
-        .background(Color(nsColor: .textBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-        )
-    }
-
-    private func headerRow(widths: [CGFloat], height: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            ForEach(Array(data.headers.enumerated()), id: \.element.id) { index, cell in
-                let alignment = index < data.alignments.count ? data.alignments[index] : .left
-                let width = index < widths.count ? widths[index] : 0
-
-                Text(cell.content)
-                    .font(.system(size: Self.headerFontSize, weight: .semibold))
-                    .frame(width: width, alignment: Alignment(horizontal: alignment.horizontalAlignment, vertical: .center))
-                    .padding(.vertical, TableMeasurement.headerVerticalPadding)
-            }
-        }
-        .frame(height: height)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .quaternaryLabelColor).opacity(0.5))
+        LargeTableView(data: data, widths: widths, measurement: measurement)
+            .frame(height: placeholderTotalHeight)
     }
 
     @ViewBuilder
-    private func bodyRow(rowIndex: Int, widths: [CGFloat], height: CGFloat) -> some View {
-        let row = data.rows[rowIndex]
-        let isLast = rowIndex == data.rows.count - 1
-
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                ForEach(Array(row.enumerated()), id: \.element.id) { cellIndex, cell in
-                    let alignment = cellIndex < data.alignments.count ? data.alignments[cellIndex] : .left
-                    let width = cellIndex < widths.count ? widths[cellIndex] : 0
-
-                    Text(cell.content)
-                        .font(.system(size: Self.bodyFontSize))
-                        .frame(width: width, alignment: Alignment(horizontal: alignment.horizontalAlignment, vertical: .center))
-                        .padding(.vertical, TableMeasurement.bodyVerticalPadding)
-                }
-            }
-            .frame(height: height)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(rowIndex % 2 == 1 ? Color(nsColor: .quaternaryLabelColor).opacity(0.2) : Color.clear)
-
-            if !isLast {
-                Divider()
-            }
+    private func tableText(_ cell: TableCell) -> some View {
+        if let text = cell.plainText {
+            // Markdown cell contents are user data, never localization keys.
+            // The verbatim initializer also keeps the compact String path from
+            // being interpreted before SwiftUI resolves its display storage.
+            Text(verbatim: text)
+        } else {
+            Text(cell.content)
         }
     }
 

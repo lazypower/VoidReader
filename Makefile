@@ -139,7 +139,7 @@ profile: build
 			--env VOID_READER_OPEN="$$ABS_FILE" \
 			$$AUTOSCROLL_ENV \
 			--output "$$TRACE_OUT" \
-			--launch -- "$$APP_PATH/Contents/MacOS/VoidReader"; \
+			--launch -- "$$APP_PATH/Contents/MacOS/VoidReader" -ApplePersistenceIgnoreState YES; \
 		echo ""; \
 		echo "  Debug log: $$DEBUG_LOG"; \
 		echo ""; \

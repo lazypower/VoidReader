@@ -50,12 +50,46 @@ public struct TableData: Identifiable {
 }
 
 /// A single table cell with rendered content.
-public struct TableCell: Identifiable {
-    public let id = UUID()
-    public var content: AttributedString
+public struct TableCell {
+    private enum Storage {
+        case plain(String)
+        case attributed(AttributedString)
+    }
+
+    private var storage: Storage
+
+    /// Rich content retained only for cells that actually contain inline
+    /// styling. Ordinary table cells stay as compact Strings; materializing
+    /// hundreds of thousands of one-run AttributedStrings was the dominant
+    /// memory cost in large tables.
+    public var content: AttributedString {
+        get {
+            switch storage {
+            case .plain(let text): AttributedString(text)
+            case .attributed(let content): content
+            }
+        }
+        set { storage = .attributed(newValue) }
+    }
+
+    public var plainText: String? {
+        guard case .plain(let text) = storage else { return nil }
+        return text
+    }
+
+    public var text: String {
+        switch storage {
+        case .plain(let text): text
+        case .attributed(let content): String(content.characters)
+        }
+    }
 
     public init(content: AttributedString) {
-        self.content = content
+        storage = .attributed(content)
+    }
+
+    public init(text: String) {
+        storage = .plain(text)
     }
 }
 

@@ -2,19 +2,110 @@ import AppKit
 import WebKit
 import VoidReaderCore
 
-/// Renders mermaid diagrams to images for printing/PDF export.
+/// Renders Mermaid diagrams to vector-backed images. Requests are serialized
+/// so a document cannot create one WebContent process per visible diagram.
 actor MermaidImageRenderer {
+    private struct Key: Hashable {
+        let source: String
+        let maxWidth: Int
+        let themeName: String
+        let themeVariablesJSON: String
+    }
+
+    private struct Request {
+        let key: Key
+        let continuation: CheckedContinuation<NSImage?, Never>
+    }
+
+    private static let shared = MermaidImageRenderer()
+    private static let cacheLimit = 32
+
+    private var cache: [Key: NSImage] = [:]
+    private var cacheOrder: [Key] = []
+    private var pending: [Request] = []
+    private var isRendering = false
 
     /// Renders a mermaid diagram source to an NSImage.
-    static func render(source: String, maxWidth: CGFloat = 500) async -> NSImage? {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.main.async {
-                let renderer = WebViewRenderer(source: source, maxWidth: maxWidth) { image in
-                    continuation.resume(returning: image)
+    static func render(
+        source: String,
+        maxWidth: CGFloat = 500,
+        themeName: String = "default",
+        themeVariables: [String: String] = [:]
+    ) async -> NSImage? {
+        let variablesJSON = Self.encodeThemeVariables(themeVariables)
+        let key = Key(
+            source: source,
+            maxWidth: Int(maxWidth.rounded()),
+            themeName: themeName,
+            themeVariablesJSON: variablesJSON
+        )
+        return await shared.image(for: key)
+    }
+
+    private static func encodeThemeVariables(_ variables: [String: String]) -> String {
+        guard !variables.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: variables, options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else { return "{}" }
+        return json
+    }
+
+    private func image(for key: Key) async -> NSImage? {
+        if let image = cache[key] {
+            touch(key)
+            return image
+        }
+
+        return await withCheckedContinuation { continuation in
+            pending.append(Request(key: key, continuation: continuation))
+            startNextIfNeeded()
+        }
+    }
+
+    private func startNextIfNeeded() {
+        guard !isRendering, !pending.isEmpty else { return }
+
+        let request = pending.removeFirst()
+        if let image = cache[request.key] {
+            touch(request.key)
+            request.continuation.resume(returning: image)
+            startNextIfNeeded()
+            return
+        }
+
+        isRendering = true
+        let key = request.key
+        DispatchQueue.main.async {
+            let renderer = WebViewRenderer(
+                source: key.source,
+                maxWidth: CGFloat(key.maxWidth),
+                themeName: key.themeName,
+                themeVariablesJSON: key.themeVariablesJSON
+            ) { image in
+                Task {
+                    await Self.shared.finish(request, image: image)
                 }
-                renderer.start()
+            }
+            renderer.start()
+        }
+    }
+
+    private func finish(_ request: Request, image: NSImage?) {
+        if let image {
+            cache[request.key] = image
+            touch(request.key)
+            while cacheOrder.count > Self.cacheLimit {
+                cache.removeValue(forKey: cacheOrder.removeFirst())
             }
         }
+
+        request.continuation.resume(returning: image)
+        isRendering = false
+        startNextIfNeeded()
+    }
+
+    private func touch(_ key: Key) {
+        cacheOrder.removeAll { $0 == key }
+        cacheOrder.append(key)
     }
 
     /// Renders multiple mermaid diagrams, returning a dictionary keyed by source.
@@ -47,6 +138,8 @@ actor MermaidImageRenderer {
 private class WebViewRenderer: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
     private let source: String
     private let maxWidth: CGFloat
+    private let themeName: String
+    private let themeVariablesJSON: String
     private let completion: (NSImage?) -> Void
     private var webView: WKWebView?
     /// Off-screen host window. A windowless WKWebView receives no display frames,
@@ -63,9 +156,17 @@ private class WebViewRenderer: NSObject, WKNavigationDelegate, WKScriptMessageHa
     /// enough; a second `finish` (which would fatally double-resume) is dropped.
     private var finished = false
 
-    init(source: String, maxWidth: CGFloat, completion: @escaping (NSImage?) -> Void) {
+    init(
+        source: String,
+        maxWidth: CGFloat,
+        themeName: String,
+        themeVariablesJSON: String,
+        completion: @escaping (NSImage?) -> Void
+    ) {
         self.source = source
         self.maxWidth = maxWidth
+        self.themeName = themeName
+        self.themeVariablesJSON = themeVariablesJSON
         self.completion = completion
         super.init()
     }
@@ -117,11 +218,10 @@ private class WebViewRenderer: NSObject, WKNavigationDelegate, WKScriptMessageHa
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
 
-        // Use default light theme for printing
         template = template
             .replacingOccurrences(of: "{{MERMAID_SOURCE}}", with: escapedSource)
-            .replacingOccurrences(of: "{{MERMAID_THEME}}", with: "default")
-            .replacingOccurrences(of: "{{MERMAID_THEME_VARIABLES}}", with: "{}")
+            .replacingOccurrences(of: "{{MERMAID_THEME}}", with: themeName)
+            .replacingOccurrences(of: "{{MERMAID_THEME_VARIABLES}}", with: themeVariablesJSON)
 
         let resourcesURL = Bundle.main.resourceURL
         webView.loadHTMLString(template, baseURL: resourcesURL)
@@ -186,6 +286,7 @@ private class WebViewRenderer: NSObject, WKNavigationDelegate, WKScriptMessageHa
 
         // Clean up webview + its off-screen host window
         if let webView = webView {
+            webView.stopLoading()
             webView.configuration.userContentController.removeScriptMessageHandler(forName: "sizeReporter")
             webView.navigationDelegate = nil
         }
