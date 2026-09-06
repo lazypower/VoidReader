@@ -21,4 +21,10 @@ public enum RenderingThresholds {
     /// Hard ceiling above which code is not syntax-highlighted at all — the
     /// highlighter's cost is superlinear, so past this we render plain text.
     public static let maxHighlightChars = 1_000_000
+
+    /// Maximum size of one logical fenced code block that receives syntax
+    /// coloring. Segmented blocks larger than this stay styled as monospaced
+    /// code but skip token-level coloring; publishing thousands of highlight
+    /// runs while the user scrolls causes a multi-second view-graph storm.
+    public static let maxHighlightedLogicalCodeBlockChars = 200_000
 }

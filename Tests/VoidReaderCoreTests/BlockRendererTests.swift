@@ -87,6 +87,36 @@ struct BlockRendererTests {
         }
     }
 
+    @Test("Plain table cells keep compact string storage")
+    func plainTableCellsStayCompact() {
+        let markdown = "| Name | Value |\n| --- | --- |\n| Alpha | 42 |"
+
+        for block in BlockRenderer.render(markdown) {
+            guard case .table(let data) = block else { continue }
+            #expect(data.headers.map(\.plainText) == ["Name", "Value"])
+            #expect(data.rows.first?.map(\.plainText) == ["Alpha", "42"])
+            return
+        }
+
+        Issue.record("Expected a rendered table")
+    }
+
+    @Test("Styled table cells retain attributed content")
+    func styledTableCellsStayRich() {
+        let markdown = "| Name | Value |\n| --- | --- |\n| **Alpha** | [Docs](https://example.com) |"
+
+        for block in BlockRenderer.render(markdown) {
+            guard case .table(let data) = block, let row = data.rows.first else { continue }
+            #expect(row[0].plainText == nil)
+            #expect(row[1].plainText == nil)
+            #expect(row[0].text == "Alpha")
+            #expect(row[1].content.runs.contains { $0.link != nil })
+            return
+        }
+
+        Issue.record("Expected a rendered table")
+    }
+
     @Test("Task list tracks checked state")
     func taskListCheckedState() {
         let markdown = """

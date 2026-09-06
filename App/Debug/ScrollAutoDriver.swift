@@ -55,6 +55,9 @@ private final class AutoDriverView: NSView {
     private var y: CGFloat = 0
     private var maxY: CGFloat = 0
     private var pointsPerTick: CGFloat = 400
+    private var tickCount = 0
+    private var readinessAttempts = 0
+    private static let maximumReadinessAttempts = 120
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -86,13 +89,31 @@ private final class AutoDriverView: NSView {
             return
         }
 
+        let docHeight = docView.frame.height
+        let clipHeight = sv.contentView.bounds.height
+        guard docHeight > clipHeight else {
+            readinessAttempts += 1
+            guard readinessAttempts < Self.maximumReadinessAttempts else {
+                DebugLog.warning(
+                    .scroll,
+                    "AutoDriverView: document never became scrollable docHeight=\(docHeight) clipHeight=\(clipHeight)"
+                )
+                return
+            }
+            // Long single-block documents can still be parsing when the
+            // configured delay expires. Wait for the real document height
+            // instead of recording a false zero-distance scroll and exiting.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                self?.start()
+            }
+            return
+        }
+
         let speed = ProcessInfo.processInfo.environment["VOID_READER_AUTOSCROLL_SPEED"] ?? "fast"
         // ~60Hz tick; fast ≈ 24000 pt/s (wheel-fling territory), slow
         // ≈ 3600 pt/s (steady two-finger drag).
         pointsPerTick = (speed == "slow") ? 60 : 400
 
-        let docHeight = docView.frame.height
-        let clipHeight = sv.contentView.bounds.height
         maxY = max(0, docHeight - clipHeight)
         y = 0
 
@@ -100,6 +121,8 @@ private final class AutoDriverView: NSView {
             .scroll,
             "AutoDriverView: starting scroll speed=\(speed) docHeight=\(docHeight) clipHeight=\(clipHeight) maxY=\(maxY)"
         )
+        FrameDropMonitor.shared.reset()
+        tickCount = 0
 
         signpostState = signposter.beginInterval(
             "scrollDriver",
@@ -120,6 +143,10 @@ private final class AutoDriverView: NSView {
             return
         }
         y += pointsPerTick
+        tickCount += 1
+        if tickCount.isMultiple(of: 300) {
+            DebugLog.log(.perf, "Scroll frame checkpoint: \(FrameDropMonitor.shared.summary)")
+        }
         if y >= maxY {
             y = maxY
             sv.contentView.scroll(to: NSPoint(x: 0, y: y))
@@ -138,6 +165,7 @@ private final class AutoDriverView: NSView {
             signpostState = nil
         }
         DebugLog.info(.scroll, "AutoDriverView: scroll complete at y=\(y)")
+        FrameDropMonitor.shared.stop()
 
         let terminate = ProcessInfo.processInfo.environment["VOID_READER_AUTOSCROLL_TERMINATE"] ?? "1"
         guard terminate == "1" else { return }

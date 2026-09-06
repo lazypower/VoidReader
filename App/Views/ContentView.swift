@@ -55,14 +55,12 @@ struct ContentView: View {
 
     // Scroll position tracking
     @State private var hasRestoredScroll = false
-    @State private var contentHeight: CGFloat = 0
-    @State private var visibleHeight: CGFloat = 0
     @State private var scrollProxy: ScrollViewProxy?
     @State private var savedScrollBlockIndex: Int?
     @State private var currentTopBlockIndex: Int = 0
     @State private var displayedPercentRead: Int = 0
     @State private var scrollOffsetForPercent: CGFloat = 0
-    @State private var percentUpdateTask: Task<Void, Never>?
+    @State private var scrollFractionForPersistence: Double = 0
 
     // Find bar
     @State private var showFindBar = false
@@ -100,12 +98,9 @@ struct ContentView: View {
     /// measurement cache pattern.
     @State private var tableMeasurementCache = TableMeasurementCache()
 
-    /// Authoritative document-wide height index. Sidesteps SwiftUI's
-    /// `LazyVStack`-biased `GeometryReader`-reported content height (which
-    /// grows as rows materialize) with a prefix-sum over per-block heights
-    /// — measured where we have them, fallback-estimated otherwise. This
-    /// is what `updateScrollPercent` divides by, so the percentage no
-    /// longer jumps when the user scrolls into unmaterialized regions.
+    /// Document-wide block-height index used to map saved scroll fractions
+    /// back to block anchors. The live percentage itself comes directly from
+    /// NSScrollView, whose scrollable range is exact after layout.
     @StateObject private var documentHeightIndex = DocumentHeightIndex()
 
     // Lint warnings
@@ -603,53 +598,60 @@ struct ContentView: View {
         }
 
         // For large documents, use progressive rendering:
-        // 1. Render first screen immediately (fast)
+        // 1. Prepare the first structurally complete chunk off-main
         // 2. Continue rendering rest in background
         // 3. Update view incrementally
         DebugLog.log(.rendering, "updateRenderedBlocks: progressive path (\(text.count) chars)")
         isRendering = true
         let style = renderStyle  // Capture value type
-
-        // Step 1: Immediately render the first chunk. The chunker parses the
-        // document AST once and cuts at the first top-level block boundary
-        // past ~20KB — so code fences, lists, and blockquotes never get split
-        // mid-structure. See MarkdownChunker for the rationale.
-        let firstChunkEnd = MarkdownChunker.findFirstChunkEnd(in: text)
-        let firstChunk = String(text.prefix(firstChunkEnd))
-
-        // Signpost: renderBatch index=0 — initial progressive chunk.
-        let initialState = renderingSignposter.beginInterval(
-            "renderBatch",
-            id: renderingSignposter.makeSignpostID(),
-            "index=0 mode=initial"
-        )
-        let initialBlocks = DebugLog.measure(.rendering, "Initial chunk (\(firstChunk.count) chars)") {
-            BlockRenderer.render(firstChunk, style: style)
-        }
-        renderingSignposter.endInterval("renderBatch", initialState, "blocks=\(initialBlocks.count)")
-
-        renderedBlocks = initialBlocks
+        renderedBlocks = []
         reconfigureHeightIndex()
-        // Kick off off-main measurement for the first chunk's code blocks
-        // immediately — by the time the user starts scrolling, the prefetch
-        // is usually done and large code blocks render at their authoritative
-        // height from the first frame (no async post-layout height shift).
-        prefetchCodeBlockMeasurements()
-        prefetchTableMeasurements()
-        emitFirstPaintIfNeeded(blockCount: initialBlocks.count)
-        DebugLog.log(.rendering, "  → Initial \(initialBlocks.count) blocks shown immediately")
-
-        // If we rendered everything in the first chunk, we're done
-        if firstChunkEnd >= text.count {
-            isRendering = false
-            DebugLog.logMemory(.perf, context: "After render complete (single chunk)")
-            return
-        }
-
-        // Step 2: Render the rest in background
-        let remainingText = String(text.dropFirst(firstChunkEnd))
 
         renderTask = Task {
+            // The chunker performs a full swift-markdown parse to find a safe
+            // boundary. Keeping both that pass and the initial render off the
+            // main actor is essential for a document whose first top-level
+            // block is a multi-megabyte table or code fence.
+            let prepared = await Task.detached(priority: .userInitiated) {
+                let firstChunkEnd = MarkdownChunker.findFirstChunkEnd(in: text)
+                guard !Task.isCancelled else { return (firstChunkEnd, [MarkdownBlock]()) }
+
+                let firstChunk = String(text.prefix(firstChunkEnd))
+                let signposter = Signposts.signposter(for: .rendering)
+                let initialState = signposter.beginInterval(
+                    "renderBatch",
+                    id: signposter.makeSignpostID(),
+                    "index=0 mode=initial"
+                )
+                let initialBlocks = DebugLog.measure(
+                    .rendering,
+                    "Initial chunk (\(firstChunk.count) chars)"
+                ) {
+                    BlockRenderer.render(firstChunk, style: style)
+                }
+                signposter.endInterval("renderBatch", initialState, "blocks=\(initialBlocks.count)")
+                return (firstChunkEnd, initialBlocks)
+            }.value
+
+            guard !Task.isCancelled else { return }
+
+            let firstChunkEnd = prepared.0
+            let initialBlocks = prepared.1
+            renderedBlocks = initialBlocks
+            reconfigureHeightIndex()
+            prefetchCodeBlockMeasurements()
+            prefetchTableMeasurements()
+            emitFirstPaintIfNeeded(blockCount: initialBlocks.count)
+            DebugLog.log(.rendering, "  → Initial \(initialBlocks.count) blocks shown")
+
+            if firstChunkEnd >= text.count {
+                isRendering = false
+                DebugLog.logMemory(.perf, context: "After render complete (single chunk)")
+                return
+            }
+
+            let remainingText = String(text.dropFirst(firstChunkEnd))
+
             // Signpost: renderBatch index=1 — background continuation. The interval spans the
             // detached parse + the main-actor append so the trace shows the full latency from
             // "background work started" to "blocks visible".
@@ -673,24 +675,22 @@ struct ContentView: View {
                 return
             }
 
-            await MainActor.run {
-                DebugLog.log(.rendering, "Appending \(moreBlocks.count) blocks...")
-                let assignStart = CFAbsoluteTimeGetCurrent()
-                renderedBlocks = initialBlocks + moreBlocks
-                let assignTime = (CFAbsoluteTimeGetCurrent() - assignStart) * 1000
-                DebugLog.log(.rendering, "Block append took \(String(format: "%.2f", assignTime))ms")
-                DebugLog.log(.rendering, "  → Total \(renderedBlocks.count) blocks")
-                isRendering = false
-                reconfigureHeightIndex()
-                // Prefetch measurements for the full block list — the first
-                // chunk already kicked off its own; this re-runs and fast-path
-                // skips cache-hits, so only the newly-appended blocks produce
-                // real work.
-                prefetchCodeBlockMeasurements()
-        prefetchTableMeasurements()
-                DebugLog.logMemory(.perf, context: "After render complete")
-                renderingSignposter.endInterval("renderBatch", bgState, "blocks=\(moreBlocks.count)")
-            }
+            DebugLog.log(.rendering, "Appending \(moreBlocks.count) blocks...")
+            let assignStart = CFAbsoluteTimeGetCurrent()
+            renderedBlocks = initialBlocks + moreBlocks
+            let assignTime = (CFAbsoluteTimeGetCurrent() - assignStart) * 1000
+            DebugLog.log(.rendering, "Block append took \(String(format: "%.2f", assignTime))ms")
+            DebugLog.log(.rendering, "  → Total \(renderedBlocks.count) blocks")
+            isRendering = false
+            reconfigureHeightIndex()
+            // Prefetch measurements for the full block list — the first
+            // chunk already kicked off its own; this re-runs and fast-path
+            // skips cache-hits, so only the newly-appended blocks produce
+            // real work.
+            prefetchCodeBlockMeasurements()
+            prefetchTableMeasurements()
+            DebugLog.logMemory(.perf, context: "After render complete")
+            renderingSignposter.endInterval("renderBatch", bgState, "blocks=\(moreBlocks.count)")
         }
     }
 
@@ -738,7 +738,8 @@ struct ContentView: View {
             // and do their own late measurement, re-introducing the
             // post-paint height shift this prefetch exists to prevent.
             guard case .codeBlock(let data) = block,
-                  data.originalBlockSize > CodeBlockView.maxSwiftUITextChars else { continue }
+                  data.originalBlockSize > CodeBlockView.maxSwiftUITextChars,
+                  data.originalBlockSize <= RenderingThresholds.maxHighlightedLogicalCodeBlockChars else { continue }
 
             let chrome = CodeBlockView.chromeHeight(
                 isFirst: data.isSegmentFirst,
@@ -751,6 +752,7 @@ struct ContentView: View {
                 fontName: fontFamily ?? "",
                 fontSize: fontSize,
                 themeName: themeName,
+                allowsHighlighting: data.originalBlockSize <= RenderingThresholds.maxHighlightedLogicalCodeBlockChars,
                 cache: cache
             ) { _, result in
                 // Feed the authoritative height (text + chrome) into the
@@ -817,11 +819,6 @@ struct ContentView: View {
                 BlockSpacing.topSpacing(at: index, in: snapshot)
             }
         )
-        // The height denominator just changed — recalculate scroll percent
-        // at the current offset. Without this, progressive rendering leaves
-        // the percentage stuck at the value computed against the initial
-        // (partial) block list.
-        updateScrollPercent(offset: scrollOffsetForPercent)
     }
 
     private func scrollToHeading(_ heading: HeadingInfo) {
@@ -1137,19 +1134,14 @@ struct ContentView: View {
         ScrollViewReader { proxy in
             ZStack {
                 ScrollView {
-                    // Scroll position tracker - MUST be outside LazyVStack to fire continuously
-                    GeometryReader { geo in
-                        Color.clear
-                            .onChange(of: geo.frame(in: .named("reader-scroll")).minY) { _, newY in
-                                updateScrollPercent(offset: -newY)
-                            }
-                            .onAppear {
-                                updateScrollPercent(offset: -geo.frame(in: .named("reader-scroll")).minY)
-                            }
-                    }
-                    .frame(height: 0)
-
                     VStack(spacing: 0) {
+                        // Read the actual NSScrollView geometry. Keep the
+                        // representable inside the document's root stack so
+                        // its AppKit ancestry is the same reliable path used
+                        // by ScrollAutoDriver.
+                        ScrollPercentageObserver(onPositionChange: handleScrollPosition)
+                            .frame(width: 0, height: 0)
+
                         // Anchor at top for scroll restoration
                         Color.clear.frame(height: 1).id("top")
 
@@ -1173,7 +1165,6 @@ struct ContentView: View {
                             codeFontFamily: resolvedCodeFontFamily,
                             onTaskToggle: handleTaskToggle,
                             onTopBlockChange: updateCurrentHeading,
-                            onScrollProgress: handleScrollProgress,
                             onMermaidExpand: handleMermaidExpand
                         )
                         .environment(\.codeBlockMeasurementCache, codeBlockMeasurementCache)
@@ -1186,32 +1177,8 @@ struct ContentView: View {
                         .padding(fullWidthReader ? 24 : 40)
                         .frame(maxWidth: fullWidthReader ? .infinity : 720, alignment: .leading)
                     }
-                    .background(
-                        GeometryReader { contentGeo in
-                            Color.clear
-                                .onChange(of: contentGeo.size.height) { _, newHeight in
-                                    contentHeight = newHeight
-                                    updateScrollPercent(offset: scrollOffsetForPercent)
-                                }
-                                .onAppear {
-                                    contentHeight = contentGeo.size.height
-                                }
-                        }
-                    )
                 }
                 .coordinateSpace(name: "reader-scroll")
-                .overlay(
-                    GeometryReader { scrollGeo in
-                        Color.clear
-                            .onAppear {
-                                visibleHeight = scrollGeo.size.height
-                            }
-                            .onChange(of: scrollGeo.size.height) { _, newHeight in
-                                visibleHeight = newHeight
-                                updateScrollPercent(offset: scrollOffsetForPercent)
-                            }
-                    }
-                )
 
                 // Loading indicator for large documents
                 if isRendering {
@@ -1261,14 +1228,6 @@ struct ContentView: View {
                 guard !isRendering, !searchMatches.isEmpty else { return }
                 scrollToMatch(0, proxy: proxy)
             }
-            .onChange(of: documentHeightIndex.totalHeight) { _, _ in
-                // As per-block measurements land out of order (prefetch
-                // storm → serialized rebuild), totalHeight walks toward
-                // its final value. Rerun the percent math each time so
-                // the status bar tracks the authoritative number rather
-                // than the stale first-build estimate.
-                updateScrollPercent(offset: scrollOffsetForPercent)
-            }
         }
         .frame(maxWidth: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
@@ -1277,14 +1236,7 @@ struct ContentView: View {
 
     private func saveScrollPosition() {
         guard let path = fileURL?.path else { return }
-        // Save the fraction using the LIVE scroll offset (scrollOffsetForPercent,
-        // the one the observer actually updates) over the authoritative
-        // DocumentHeightIndex.totalHeight — the same coordinate space restore
-        // uses. The old code divided a never-updated `scrollOffset` by the SwiftUI
-        // contentHeight, so it saved 0 for every document.
-        let total = documentHeightIndex.totalHeight
-        let fraction = total > 0 ? min(max(Double(scrollOffsetForPercent / total), 0), 1) : 0
-        ScrollPositionStore.shared.savePosition(fraction, for: path)
+        ScrollPositionStore.shared.savePosition(scrollFractionForPersistence, for: path)
     }
 
     private func restoreScrollPosition(proxy: ScrollViewProxy) {
@@ -1341,55 +1293,12 @@ struct ContentView: View {
         }
     }
 
-    private func handleScrollProgress(_ percent: Int) {
-        DebugLog.log(.scroll, "ContentView.handleScrollProgress: \(percent)%, current displayedPercentRead=\(displayedPercentRead)")
-        // Debounce to update on scroll stop
-        percentUpdateTask?.cancel()
-        percentUpdateTask = Task {
-            try? await Task.sleep(nanoseconds: 150_000_000)
-            guard !Task.isCancelled else { return }
-            DebugLog.log(.scroll, "  → setting displayedPercentRead=\(percent)")
-            displayedPercentRead = percent
-        }
-    }
+    private func handleScrollPosition(_ position: ReaderScrollPosition) {
+        scrollOffsetForPercent = position.offset
+        scrollFractionForPersistence = position.fraction
 
-    /// Update scroll percentage based on scroll offset.
-    ///
-    /// Denominator comes from `documentHeightIndex.totalHeight` — the
-    /// prefix-sum over per-block heights — not from SwiftUI's
-    /// `GeometryReader`-reported content height. The latter under-reports
-    /// when `LazyVStack` hasn't materialized later rows, which was causing
-    /// the scroll % to saturate at 100% partway through large docs
-    /// (symptom: "jumps from 52% to 100% as I scroll down").
-    ///
-    /// `outerChrome` accounts for non-block height in the scroll
-    /// container: the reader's outer padding and the 1pt top anchor.
-    /// Without it, totalHeight is ~81pt less than actual content height,
-    /// and the percentage saturates early on every document.
-    private func updateScrollPercent(offset: CGFloat) {
-        // Store offset for later recalculation when dimensions change
-        scrollOffsetForPercent = offset
-
-        // Skip if in edit mode
-        guard !isEditMode else { return }
-
-        // The height index tracks block heights + inter-block spacing.
-        // The reader view wraps content in outer padding + a 1pt anchor
-        // that aren't tracked by the index.
-        let outerPadding = (fullWidthReader ? CGFloat(24) : CGFloat(40)) * 2
-        let outerChrome = outerPadding + 1
-
-        let fraction = documentHeightIndex.scrollFraction(
-            offset: offset,
-            visibleHeight: visibleHeight,
-            outerChrome: outerChrome
-        )
-        let percent = Int((fraction * 100).rounded())
-
-        // Only update if changed
-        if percent != displayedPercentRead {
-            displayedPercentRead = percent
-        }
+        guard !isEditMode, position.percent != displayedPercentRead else { return }
+        displayedPercentRead = position.percent
     }
 
     private func handleMermaidExpand(_ source: String) {

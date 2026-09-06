@@ -108,12 +108,12 @@ if ! command -v xctrace >/dev/null 2>&1; then
     exit 1
 fi
 
-# Resolve the .app bundle via xcodebuild rather than assuming a path. `make
-# build` doesn't pass -derivedDataPath, so products land in
-# ~/Library/Developer/Xcode/DerivedData/<project>-<hash>/Build/Products/Debug/
-# which varies per machine and per checkout.
+# Resolve the .app bundle from the same checkout-local DerivedData directory
+# used by the Makefile. This keeps parallel worktrees isolated and prevents a
+# trace from silently launching another checkout's build.
 APP_BUNDLE="$(
-    xcodebuild -scheme VoidReader -configuration Debug -showBuildSettings 2>/dev/null \
+    xcodebuild -derivedDataPath "$REPO_ROOT/build/derived" \
+        -scheme VoidReader -configuration Debug -showBuildSettings 2>/dev/null \
         | awk -F' = ' '/^ *BUILT_PRODUCTS_DIR = /{print $2; exit}'
 )/VoidReader.app"
 
@@ -149,8 +149,10 @@ xctrace record \
     --instrument os_signpost \
     --output "$TRACE_PATH" \
     --time-limit "${DURATION}s" \
+    --env "VOID_READER_OPEN=$FIXTURE" \
+    --env VOID_READER_DEBUG=1 \
     --target-stdout - \
-    --launch -- "$APP_BUNDLE/Contents/MacOS/VoidReader" "$FIXTURE" 2>&1 \
+    --launch -- "$APP_BUNDLE/Contents/MacOS/VoidReader" -ApplePersistenceIgnoreState YES 2>&1 \
     | tee "$XCTRACE_LOG_PATH"
 xctrace_exit=${PIPESTATUS[0]}
 set -e
