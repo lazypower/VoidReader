@@ -4,6 +4,31 @@ All notable changes to VoidReader. We actually read markdown here.
 
 ---
 
+## [1.2.2] - 2026-09-06
+
+### The "Long Read" Release
+
+VoidReader can finally read the long version without making you regret opening it. Documents with tens of thousands of rendered blocks now keep their work bounded to the viewport instead of asking SwiftUI to hold the whole thing at once.
+
+#### Performance
+
+- **Long mixed documents stay responsive** - a reusable AppKit viewport canvas keeps at most 64 SwiftUI block renderers alive while scrolling
+- **Large tables scroll instead of beachballing** - visible rows draw through one AppKit canvas while keeping the familiar typography, striping, separators, and rounded border
+- **Huge code fences remain usable** - bounded segmentation and visible-line drawing avoid materializing the entire highlighted block at once
+- **Mermaid stops multiplying browsers** - inline diagrams use cached vector-backed images from one bounded renderer; expanded diagrams remain interactive
+- Document geometry is prepared off the main thread and published atomically; scroll percentage now follows the actual `NSScrollView`
+
+#### The Numbers
+
+- 50K-row table: 600 dropped frames in the earlier implementation → 0 through a 1,500-frame run
+- 59,459-line mixed document: 377 missed-frame events in the first 396 frames → 78 across a complete 2,440-frame, 0–100% pass (3.2%, ~1.86/sec)
+- 12 Mermaid diagrams: 11 new WebContent processes → 0
+- 193 package tests plus the app-target suite passing
+
+#### Known, and on the list
+
+- Mermaid, image, and display-math blocks in very large documents use conservative height slots. Exact post-render media reflow is intentionally deferred so it can be measured without bringing scroll-range churn back.
+
 ## [1.2.1] - 2026-07-08
 
 ### The "Trust Issues" Release
