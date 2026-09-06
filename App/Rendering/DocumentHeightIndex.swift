@@ -121,6 +121,26 @@ final class DocumentHeightIndex: ObservableObject {
         scheduleRebuild()
     }
 
+    /// Record a viewport-sized batch synchronously. The reusable document
+    /// canvas measures only its live rows, so applying those measurements in
+    /// one rebuild avoids a cascade of prefix-sum publications and gives the
+    /// canvas one atomic geometry change around which it can preserve the
+    /// visible scroll anchor.
+    @discardableResult
+    func recordHeights(_ heights: [Int: CGFloat]) -> Bool {
+        var changed = false
+        for (index, height) in heights where index >= 0 && index < blockCount {
+            if let existing = measured[index], abs(existing - height) < 2 {
+                continue
+            }
+            measured[index] = height
+            changed = true
+        }
+        guard changed else { return false }
+        rebuildNow()
+        return true
+    }
+
     // MARK: - Reads
 
     /// Y-offset where block `i` starts. O(1).

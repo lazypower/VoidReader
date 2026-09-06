@@ -36,6 +36,7 @@ struct ContentView: View {
     @State private var headings: [HeadingInfo] = []
     @State private var selectedHeadingID: UUID?
     @State private var scrollToHeadingIndex: Int?
+    @State private var headingLocations: [(heading: HeadingInfo, blockIndex: Int)] = []
 
     // Debounce publisher for preview updates
     @State private var textUpdatePublisher = PassthroughSubject<String, Never>()
@@ -70,6 +71,9 @@ struct ContentView: View {
     @State private var caseSensitive = false
     @State private var useRegex = false
     @State private var searchMatches: [TextSearcher.Match] = []
+    /// Advances for every completed query, even when consecutive queries
+    /// happen to return the same number of matches.
+    @State private var searchResultGeneration = 0
     /// Captured substrings for each match, parallel to `searchMatches`. Populated
     /// once per search update so `currentMatchText` is a cheap array index
     /// instead of re-searching `document.text` on every SwiftUI re-render.
@@ -78,6 +82,7 @@ struct ContentView: View {
 
     // Cached rendered blocks (expensive to compute)
     @State private var renderedBlocks: [MarkdownBlock] = []
+    @State private var renderedBlocksGeneration: Int = 0
     @State private var isRendering = false
     @State private var renderTask: Task<Void, Never>?
     /// Guard for the `firstPaint` signpost event so it fires exactly once per
@@ -102,6 +107,7 @@ struct ContentView: View {
     /// back to block anchors. The live percentage itself comes directly from
     /// NSScrollView, whose scrollable range is exact after layout.
     @StateObject private var documentHeightIndex = DocumentHeightIndex()
+    @StateObject private var largeDocumentNavigator = LargeDocumentNavigator()
 
     // Lint warnings
     @State private var lintWarnings: [LintWarning] = []
@@ -540,6 +546,7 @@ struct ContentView: View {
         if text.count < RenderingThresholds.syncRenderMaxChars {
             let doc = MarkdownParser.parse(text)
             headings = MarkdownParser.extractHeadings(from: doc)
+            rebuildHeadingLocations()
             return
         }
 
@@ -554,6 +561,7 @@ struct ContentView: View {
 
             await MainActor.run {
                 headings = extractedHeadings
+                rebuildHeadingLocations()
             }
         }
     }
@@ -590,9 +598,11 @@ struct ContentView: View {
             renderingSignposter.endInterval("renderBatch", state, "blocks=\(blocks.count)")
 
             renderedBlocks = blocks
+            renderedBlocksGeneration &+= 1
+            rebuildHeadingLocations()
             reconfigureHeightIndex()
             prefetchCodeBlockMeasurements()
-        prefetchTableMeasurements()
+            prefetchTableMeasurements()
             emitFirstPaintIfNeeded(blockCount: blocks.count)
             return
         }
@@ -605,6 +615,8 @@ struct ContentView: View {
         isRendering = true
         let style = renderStyle  // Capture value type
         renderedBlocks = []
+        renderedBlocksGeneration &+= 1
+        headingLocations = []
         reconfigureHeightIndex()
 
         renderTask = Task {
@@ -638,6 +650,8 @@ struct ContentView: View {
             let firstChunkEnd = prepared.0
             let initialBlocks = prepared.1
             renderedBlocks = initialBlocks
+            renderedBlocksGeneration &+= 1
+            rebuildHeadingLocations()
             reconfigureHeightIndex()
             prefetchCodeBlockMeasurements()
             prefetchTableMeasurements()
@@ -678,6 +692,8 @@ struct ContentView: View {
             DebugLog.log(.rendering, "Appending \(moreBlocks.count) blocks...")
             let assignStart = CFAbsoluteTimeGetCurrent()
             renderedBlocks = initialBlocks + moreBlocks
+            renderedBlocksGeneration &+= 1
+            rebuildHeadingLocations()
             let assignTime = (CFAbsoluteTimeGetCurrent() - assignStart) * 1000
             DebugLog.log(.rendering, "Block append took \(String(format: "%.2f", assignTime))ms")
             DebugLog.log(.rendering, "  → Total \(renderedBlocks.count) blocks")
@@ -823,25 +839,52 @@ struct ContentView: View {
 
     private func scrollToHeading(_ heading: HeadingInfo) {
         selectedHeadingID = heading.id
-        // Find which block contains this heading and scroll there
-        if let blockIdx = MarkdownReaderViewWithAnchors.blockIndex(for: heading.text, in: renderedBlocks) {
-            scrollToHeadingIndex = blockIdx
+        scrollToHeadingIndex = headingLocations.first(where: { $0.heading.id == heading.id })?.blockIndex
+    }
+
+    /// Build the heading lookup once when either input changes. Matching is a
+    /// linear pass over blocks followed by a linear pass over headings;
+    /// scrolling then needs only a binary search.
+    private func rebuildHeadingLocations() {
+        guard !headings.isEmpty, !renderedBlocks.isEmpty else {
+            headingLocations = []
+            return
         }
+
+        var blockIndicesByText: [String: [Int]] = [:]
+        for (index, block) in renderedBlocks.enumerated() {
+            guard case .text(let attributed) = block else { continue }
+            let text = String(attributed.characters)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            blockIndicesByText[text, default: []].append(index)
+        }
+
+        var consumedByText: [String: Int] = [:]
+        var locations: [(heading: HeadingInfo, blockIndex: Int)] = []
+        locations.reserveCapacity(headings.count)
+        for heading in headings {
+            let text = heading.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let consumed = consumedByText[text, default: 0]
+            guard let candidates = blockIndicesByText[text], consumed < candidates.count else { continue }
+            locations.append((heading, candidates[consumed]))
+            consumedByText[text] = consumed + 1
+        }
+        headingLocations = locations.sorted { $0.blockIndex < $1.blockIndex }
     }
 
     /// Finds the heading that corresponds to (or precedes) the given block index.
     private func headingForBlock(_ blockIndex: Int) -> HeadingInfo? {
-        // Build mapping of heading -> block index
-        var headingBlocks: [(heading: HeadingInfo, blockIndex: Int)] = []
-        for heading in headings {
-            if let idx = MarkdownReaderViewWithAnchors.blockIndex(for: heading.text, in: renderedBlocks) {
-                headingBlocks.append((heading, idx))
+        var lower = 0
+        var upper = headingLocations.count
+        while lower < upper {
+            let middle = (lower + upper) / 2
+            if headingLocations[middle].blockIndex <= blockIndex {
+                lower = middle + 1
+            } else {
+                upper = middle
             }
         }
-
-        // Find the last heading whose block is <= the current block
-        let preceding = headingBlocks.filter { $0.blockIndex <= blockIndex }
-        return preceding.last?.heading
+        return lower > 0 ? headingLocations[lower - 1].heading : nil
     }
 
     private func updateCurrentHeading(forBlockIndex blockIndex: Int) {
@@ -894,6 +937,7 @@ struct ContentView: View {
             searchMatches = []
             matchTexts = []
             currentMatchIndex = 0
+            searchResultGeneration &+= 1
             return
         }
         // Count matches in rendered blocks (same as highlighting uses)
@@ -901,6 +945,7 @@ struct ContentView: View {
         searchMatches = matches
         matchTexts = texts
         currentMatchIndex = 0
+        searchResultGeneration &+= 1
     }
 
     /// Counts matches in the rendered block text (not raw markdown) and
@@ -1002,8 +1047,12 @@ struct ContentView: View {
             useRegex: useRegex,
             in: renderedBlocks
         ) {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                proxy.scrollTo("block-\(blockIdx)", anchor: .center)
+            if renderedBlocks.count > 1000 {
+                largeDocumentNavigator.scroll(to: blockIdx, anchor: .center)
+            } else {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    proxy.scrollTo("block-\(blockIdx)", anchor: .center)
+                }
             }
         }
     }
@@ -1156,6 +1205,7 @@ struct ContentView: View {
                             text: document.text,
                             headings: headings,
                             blocks: renderedBlocks,
+                            contentGeneration: renderedBlocksGeneration,
                             documentURL: fileURL,
                             searchText: searchText,
                             caseSensitive: caseSensitive,
@@ -1165,7 +1215,8 @@ struct ContentView: View {
                             codeFontFamily: resolvedCodeFontFamily,
                             onTaskToggle: handleTaskToggle,
                             onTopBlockChange: updateCurrentHeading,
-                            onMermaidExpand: handleMermaidExpand
+                            onMermaidExpand: handleMermaidExpand,
+                            largeDocumentNavigator: largeDocumentNavigator
                         )
                         .environment(\.codeBlockMeasurementCache, codeBlockMeasurementCache)
                         .environment(\.tableMeasurementCache, tableMeasurementCache)
@@ -1211,8 +1262,12 @@ struct ContentView: View {
             .onChange(of: scrollToHeadingIndex) { _, newIndex in
                 // Don't scroll while rendering
                 guard !isRendering, let index = newIndex else { return }
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    proxy.scrollTo("block-\(index)", anchor: .top)
+                if renderedBlocks.count > 1000 {
+                    largeDocumentNavigator.scroll(to: index, anchor: .top)
+                } else {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        proxy.scrollTo("block-\(index)", anchor: .top)
+                    }
                 }
                 // Reset after scrolling
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -1223,8 +1278,10 @@ struct ContentView: View {
                 guard !isRendering else { return }
                 scrollToMatch(newIndex, proxy: proxy)
             }
-            .onChange(of: searchMatches.count) { _, _ in
-                // Scroll to first match when search results change
+            .onChange(of: searchResultGeneration) { _, _ in
+                // A different query may have the same match count and leave
+                // currentMatchIndex at zero. Generation is the authoritative
+                // signal that the first-result destination changed.
                 guard !isRendering, !searchMatches.isEmpty else { return }
                 scrollToMatch(0, proxy: proxy)
             }
@@ -1263,7 +1320,11 @@ struct ContentView: View {
             hasRestoredScroll = true
             let targetOffset = total * CGFloat(savedFraction)
             let blockIdx = documentHeightIndex.blockIndex(atOffset: targetOffset)
-            proxy.scrollTo("block-\(blockIdx)", anchor: .top)
+            if renderedBlocks.count > 1000 {
+                largeDocumentNavigator.scroll(to: blockIdx, anchor: .top)
+            } else {
+                proxy.scrollTo("block-\(blockIdx)", anchor: .top)
+            }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { attempt(6) }
     }
@@ -1405,11 +1466,13 @@ struct ContentView: View {
                         text: debouncedText,
                         headings: headings,
                         blocks: renderedBlocks,
+                        contentGeneration: renderedBlocksGeneration,
                         documentURL: fileURL,
                         codeFontSize: CGFloat(readerFontSize * 0.875),
                         codeFontFamily: resolvedCodeFontFamily,
                         onTaskToggle: handleTaskToggle,
-                        onMermaidExpand: handleMermaidExpand
+                        onMermaidExpand: handleMermaidExpand,
+                        largeDocumentNavigator: largeDocumentNavigator
                     )
                     .environment(\.codeBlockMeasurementCache, codeBlockMeasurementCache)
                     .environment(\.tableMeasurementCache, tableMeasurementCache)
