@@ -316,7 +316,7 @@ struct BlockWalker: MarkupWalker {
 
     // MARK: - Block Elements
 
-    mutating func visitDocument(_ document: Document) {
+    mutating func visitDocument(_ document: Markdown.Document) {
         for child in document.children {
             visit(child)
         }
